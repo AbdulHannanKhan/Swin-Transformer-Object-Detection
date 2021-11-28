@@ -16,6 +16,12 @@ class MeanTeacherRunner(EpochBasedRunner):
         super().__init__(*args, **kwargs)
         self.teacher_dict = {}
         self.mean_teacher = mean_teacher
+        self.init_mean_teacher_dict()
+
+    def init_mean_teacher_dict(self):
+        self.teacher_dict = dict()
+        for k, v in self.model.module.state_dict().items():
+            self.teacher_dict[k] = v
 
     def load_mean_teacher_checkpoint(self, cfg):
         if cfg.load_from or cfg.resume_from:
@@ -32,9 +38,7 @@ class MeanTeacherRunner(EpochBasedRunner):
                 self.teacher_dict[k] = self.teacher_dict[k].cuda()
             return
 
-        self.teacher_dict = dict()
-        for k, v in self.model.module.state_dict().items():
-            self.teacher_dict[k] = v
+        self.init_mean_teacher_dict()
 
     def save_mean_teacher_checkpoint(self, state_dict, filename):
         checkpoint = {
