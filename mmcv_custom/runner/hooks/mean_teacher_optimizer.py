@@ -1,11 +1,11 @@
-from mmcv.runner.hooks import HOOKS, Hook
+from mmcv.runner.hooks import HOOKS, Hook, OptimizerHook
 
 
 @HOOKS.register_module()
-class MeanTeacherOptimizerHook(Hook):
+class MeanTeacherOptimizerHook(OptimizerHook):
 
     def __init__(self, grad_clip=None, mean_teacher=None):
-        self.grad_clip = grad_clip
+        super(MeanTeacherOptimizerHook, self).__init__(grad_clip=grad_clip)
         self.mean_teacher = mean_teacher
 
     def after_train_iter(self, runner):
