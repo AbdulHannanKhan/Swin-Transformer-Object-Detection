@@ -19,7 +19,7 @@ class MeanTeacherOptimizerHook(Hook):
                                          runner.outputs['num_samples'])
         runner.optimizer.step()
 
-        if self.mean_teacher:
+        if self.mean_teacher is not None:
             for k, v in runner.model.module.state_dict().items():
                 if k.find('num_batches_tracked') == -1:
                     runner.teacher_dict[k] = self.mean_teacher.alpha * runner.teacher_dict[k] + \
