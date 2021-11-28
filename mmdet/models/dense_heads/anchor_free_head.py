@@ -140,44 +140,6 @@ class AnchorFreeHead(BaseDenseHead, BBoxTestMixin):
         normal_init(self.conv_cls, std=0.01, bias=bias_cls)
         normal_init(self.conv_reg, std=0.01)
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        """Hack some keys of the model state dict so that can load checkpoints
-        of previous version."""
-        version = local_metadata.get('version', None)
-        if version is None:
-            # the key is different in early versions
-            # for example, 'fcos_cls' become 'conv_cls' now
-            bbox_head_keys = [
-                k for k in state_dict.keys() if k.startswith(prefix)
-            ]
-            ori_predictor_keys = []
-            new_predictor_keys = []
-            # e.g. 'fcos_cls' or 'fcos_reg'
-            for key in bbox_head_keys:
-                ori_predictor_keys.append(key)
-                key = key.split('.')
-                conv_name = None
-                if key[1].endswith('cls'):
-                    conv_name = 'conv_cls'
-                elif key[1].endswith('reg'):
-                    conv_name = 'conv_reg'
-                elif key[1].endswith('centerness'):
-                    conv_name = 'conv_centerness'
-                else:
-                    assert NotImplementedError
-                if conv_name is not None:
-                    key[1] = conv_name
-                    new_predictor_keys.append('.'.join(key))
-                else:
-                    ori_predictor_keys.pop(-1)
-            for i in range(len(new_predictor_keys)):
-                state_dict[new_predictor_keys[i]] = state_dict.pop(
-                    ori_predictor_keys[i])
-        super()._load_from_state_dict(state_dict, prefix, local_metadata,
-                                      strict, missing_keys, unexpected_keys,
-                                      error_msgs)
-
     def forward(self, feats):
         """Forward features from the upstream network.
 
