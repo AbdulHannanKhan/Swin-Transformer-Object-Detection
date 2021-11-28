@@ -12,7 +12,7 @@ from mmcv.runner.hooks import HOOKS
 @RUNNERS.register_module()
 class MeanTeacherRunner(EpochBasedRunner):
 
-    def __init__(self, *args, mean_teacher=None, **kwargs):
+    def __init__(self, *args, mean_teacher=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.teacher_dict = {}
         self.mean_teacher = mean_teacher
