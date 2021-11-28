@@ -23,6 +23,90 @@ except ImportError:
 
 
 @PIPELINES.register_module()
+class CSPMaps(object):
+
+    def __init__(self, radius=8, stride=4, regress_range=(-1, 1e8), image_shape=None):
+        self.radius = radius
+        self.stride = stride
+        self.regress_range = regress_range
+        self.image_shape = image_shape
+
+    def __call__(self, results):
+        """Call function to add csp maps to train pipeline.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: results, 'pos_map', 'scale_map', 'offset_map', keys are added into result dict.
+        """
+
+        gts, igs = results['gt_bboxes'], results['gt_bboxes_ignore']
+        pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs)
+        results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
+
+        return results
+
+    def calc_gt_center(self, gts, igs):
+
+        image_shape = self.image_shape
+        radius = self.radius
+        stride = self.stride
+        regress_range = self.regress_range
+
+        def gaussian(kernel):
+            sigma = ((kernel-1) * 0.5 - 1) * 0.3 + 0.8
+            s = 2*(sigma**2)
+            dx = np.exp(-np.square(np.arange(kernel) - int(kernel / 2)) / s)
+            return np.reshape(dx, (-1, 1))
+        radius = int(radius/stride)
+        scale_map = np.zeros((2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        offset_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        pos_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        pos_map[1, :, :, ] = 1  # channel 0: loss weights; channel 1: for ignore, ignore area will be set to 0; channel 2: classification
+
+        if not igs is None and len(igs) > 0:
+            igs = igs / stride
+            for ind in range(len(igs)):
+                x1, y1, x2, y2 = int(igs[ind, 0]), int(igs[ind, 1]), int(np.ceil(igs[ind, 2])), int(np.ceil(igs[ind, 3]))
+                pos_map[1, y1:y2, x1:x2] = 0
+        half_height = gts[:, 3] - gts[:, 1]
+        half_height = (half_height >= regress_range[0]) & (half_height <= regress_range[1])
+        inds = half_height.nonzero()
+        gts = gts[inds]
+        if len(gts) > 0:
+            gts = gts / stride
+            for ind in range(len(gts)):
+                x1, y1, x2, y2 = int(np.ceil(gts[ind, 0])), int(np.ceil(gts[ind, 1])), int(gts[ind, 2]), int(gts[ind, 3])
+                c_x, c_y = int((gts[ind, 0] + gts[ind, 2]) / 2), int((gts[ind, 1] + gts[ind, 3]) / 2)
+
+                dx = gaussian(x2-x1)
+                dy = gaussian(y2-y1)
+                gau_map = np.multiply(dy, np.transpose(dx))
+
+                pos_map[0, y1:y2, x1:x2] = np.maximum(pos_map[0, y1:y2, x1:x2], gau_map)  # gauss map
+                pos_map[1, y1:y2, x1:x2] = 1  # 1-mask map
+                pos_map[2, c_y, c_x] = 1  # center map
+
+                scale_map[0, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 3] - gts[ind, 1])  #value of height
+                scale_map[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1  # 1-mask
+
+                offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
+                offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset
+                offset_map[2, c_y, c_x] = 1  # 1-mask
+
+        return pos_map, scale_map, offset_map
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(img_shape={self.img_shape}, '
+        repr_str += f'radius={self.radius}, '
+        repr_str += f'stride={self.stride}, '
+        repr_str += f'regress_range={self.regress_range}, '
+        return repr_str
+
+
+@PIPELINES.register_module()
 class Resize(object):
     """Resize images & bbox & mask.
 

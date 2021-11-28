@@ -15,6 +15,7 @@ from terminaltables import AsciiTable
 from mmdet.core import eval_recalls
 from .builder import DATASETS
 from .custom import CustomDataset
+from .eval_mr import COCOeval as COCOMReval
 
 
 @DATASETS.register_module()
@@ -370,7 +371,7 @@ class CocoDataset(CustomDataset):
                  classwise=False,
                  proposal_nums=(100, 300, 1000),
                  iou_thrs=None,
-                 metric_items=None):
+                 metric_items=None, **kwargs):
         """Evaluation in COCO protocol.
 
         Args:
@@ -401,6 +402,31 @@ class CocoDataset(CustomDataset):
         Returns:
             dict[str, float]: COCO style evaluation metric.
         """
+
+        result_files = self.results2json(results, "./work_dirs/st/latest")
+
+        cocoGt = self.coco
+        imgIds = cocoGt.getImgIds()
+        try:
+            bbox_file = result_files["bbox"]
+            cocoDt = cocoGt.loadRes(bbox_file)
+        except IndexError:
+            print('No prediction found.')
+            return
+        metrics = ['MR_Reasonable', 'MR_Small', 'MR_Middle', 'MR_Large', 'MR_Bare', 'MR_Partial', 'MR_Heavy', 'MR_R+HO']
+        cocoEval = COCOMReval(cocoGt, cocoDt, 'bbox')
+        cocoEval.params.imgIds = imgIds
+        output = dict()
+        for id_setup in range(0, 8):
+            cocoEval.evaluate(id_setup)
+            cocoEval.accumulate()
+            cocoEval.summarize(id_setup)
+
+            key = '{}'.format(metrics[id_setup])
+            val = float('{:.3f}'.format(cocoEval.stats[id_setup]))
+            output[key] = val
+
+        return output
 
         metrics = metric if isinstance(metric, list) else [metric]
         allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
