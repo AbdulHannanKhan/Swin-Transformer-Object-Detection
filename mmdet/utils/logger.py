@@ -101,7 +101,6 @@ def log_image_with_boxes(
     backend: str = "auto",
     interval: int = 50,
 ):
-    return
     rank, _ = get_dist_info()
     if rank != 0:
         return
@@ -135,13 +134,12 @@ def log_image_with_boxes(
         labels = bboxes.new_zeros(bboxes.shape[0]).long()
         class_names = ["foreground"]
     if backend == "wandb":
-        pass
-        #im = {}
-        #im["data_or_path"] = image
-        #im["boxes"] = convert_box(
-        #    bbox_tag, bboxes, labels, class_names, scores=scores, std=image.shape[:2]
-        #)
-        #wandb.log({tag: wandb.Image(**im)}, commit=False)
+        im = {}
+        im["data_or_path"] = image
+        im["boxes"] = convert_box(
+           bbox_tag, bboxes, labels, class_names, scores=scores, std=image.shape[:2]
+        )
+        wandb.log({tag: wandb.Image(**im)}, commit=False)
     elif backend == "file":
         root_dir = os.environ.get("WORK_DIR", ".")
 

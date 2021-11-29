@@ -1,6 +1,7 @@
 from mmdet.core import bbox2result
 from ..builder import DETECTORS
 from .single_stage import SingleStageDetector
+from ...utils.logger import log_image_with_boxes
 
 
 @DETECTORS.register_module()
@@ -14,11 +15,13 @@ class CSP(SingleStageDetector):
                  bbox_head,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
+                 pretrained=None,
+                 val_img_log_interval=-1):
         super(CSP, self).__init__(backbone, neck, bbox_head, train_cfg,
                                    test_cfg, pretrained)
         self.bbox_head.test_cfg = test_cfg.csp_head
         self.bbox_head.train_cfg = train_cfg.csp_head
+        self.val_img_log_interval = val_img_log_interval
 
     def forward_train(self,
                       img,
@@ -80,4 +83,16 @@ class CSP(SingleStageDetector):
             bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes + 1)
             for det_bboxes, det_labels in bbox_list
         ]
+
+        if self.val_img_log_interval > -1:
+            log_image_with_boxes(
+                "val_image",
+                img[0],
+                bbox_list[0][:, :4],
+                bbox_tag="bbox_label",
+                scores=bbox_list[0][:, 4],
+                interval=self.val_img_log_interval,
+                img_norm_cfg=img_metas[0]["img_norm_cfg"],
+            )
+
         return bbox_results
