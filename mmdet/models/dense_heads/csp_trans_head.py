@@ -78,12 +78,15 @@ class CSPTransHead(CSPHead):
             # self.csp_reg = nn.Conv2d(self.feat_channels, 1, 3, padding=1)
             # self.csp_offset = nn.Conv2d(self.feat_channels, 2, 3, padding=1)
             self.csp_cls = SwinTransformer(patch_size=self.t_patch_size, in_chans=self.feat_channels, embed_dim=1,
-                                           depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,))
+                                           depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,),
+                                           patch_norm=False)
             self.csp_reg = SwinTransformer(patch_size=self.t_patch_size, in_chans=self.feat_channels, embed_dim=1,
-                                           depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,))
+                                           depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,),
+                                           patch_norm=False)
 
             self.csp_offset = SwinTransformer(patch_size=self.t_patch_size, in_chans=self.feat_channels, embed_dim=2,
-                                           depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,))
+                                              depths=self.t_depths, num_heads=self.t_heads, out_indices=(0,),
+                                              patch_norm=False)
             self.reg_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
             self.offset_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
 
