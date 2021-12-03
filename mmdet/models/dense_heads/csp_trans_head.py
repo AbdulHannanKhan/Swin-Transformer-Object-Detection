@@ -36,7 +36,7 @@ class SwinTransformerBlock(nn.Module):
         attn_drop (float, optional): Attention dropout rate. Default: 0.0
     """
 
-    def __init__(self, dim, num_heads, window_size=7, shift_size=0,
+    def __init__(self, dim, num_heads, window_size=1, shift_size=0,
                  qkv_bias=True, qk_scale=None, drop=0., attn_drop=0.):
         super().__init__()
         self.dim = dim
@@ -119,8 +119,7 @@ class BasicLayer(nn.Module):
                  dim,
                  depth,
                  num_heads,
-                 window_size=7,
-                 mlp_ratio=4.,
+                 window_size=1,
                  qkv_bias=True,
                  qk_scale=None,
                  drop=0.,
@@ -193,8 +192,7 @@ class SwinTransformer(nn.Module):
                  embed_dim=1,
                  depths=[1],
                  num_heads=[1],
-                 window_size=7,
-                 mlp_ratio=4.,
+                 window_size=1,
                  qkv_bias=True,
                  qk_scale=None,
                  drop_rate=0.,
@@ -222,7 +220,6 @@ class SwinTransformer(nn.Module):
                 depth=depths[i_layer],
                 num_heads=num_heads[i_layer],
                 window_size=window_size,
-                mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
                 drop=drop_rate,
