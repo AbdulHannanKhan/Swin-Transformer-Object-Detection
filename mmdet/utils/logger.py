@@ -6,6 +6,7 @@ from typing import Tuple
 
 import mmcv
 import numpy as np
+import cv2
 import torch
 from mmcv.runner.dist_utils import get_dist_info
 from mmcv.utils import get_logger
@@ -48,25 +49,24 @@ def _find_caller():
 
 
 def convert_box(tag, boxes, box_labels, class_labels, std, scores=None):
+    wandb_box = {}
     if isinstance(std, int):
         std = [std, std]
     if len(std) != 4:
         std = std[::-1] * 2
-    std = boxes.new_tensor(std).reshape(1, 4)
-    wandb_box = {}
-    boxes = boxes / std
-    boxes = boxes.detach().cpu().numpy().tolist()
-    box_labels = box_labels.detach().cpu().numpy().tolist()
+    boxes = boxes/np.array(std)
+    boxes = boxes.tolist()
+    box_labels = box_labels.tolist()
     class_labels = {k: class_labels[k] for k in range(len(class_labels))}
     wandb_box["class_labels"] = class_labels
     assert len(boxes) == len(box_labels)
     if scores is not None:
-        scores = scores.detach().cpu().numpy().tolist()
+        scores = scores.tolist()
         box_data = [
             dict(
                 position=dict(minX=box[0], minY=box[1], maxX=box[2], maxY=box[3]),
                 class_id=label,
-                scores=dict(cls=scores[i]),
+                scores=dict(cls=scores[i]), box_caption="%s (%.3f)" % (class_labels[label], scores[i])
             )
             for i, (box, label) in enumerate(zip(boxes, box_labels))
         ]
@@ -85,16 +85,18 @@ def convert_box(tag, boxes, box_labels, class_labels, std, scores=None):
 
 def color_transform(img_tensor, mean, std, to_rgb=False):
     img_np = img_tensor.detach().cpu().numpy().transpose((1, 2, 0)).astype(np.float32)
+    #height, width = img_np.shape[:2]
+    #img_np = cv2.resize(img_np, (int(width/4), int(height/4)))
     return mmcv.imdenormalize(img_np, mean, std, to_bgr=not to_rgb)
 
 
 def log_image_with_boxes(
     tag: str,
     image: torch.Tensor,
-    bboxes: torch.Tensor,
+    bboxes: np.ndarray,
     bbox_tag: str = None,
-    labels: torch.Tensor = None,
-    scores: torch.Tensor = None,
+    labels: np.ndarray = None,
+    scores: np.ndarray = None,
     class_names: Tuple[str] = None,
     filename: str = None,
     img_norm_cfg: dict = None,
@@ -105,9 +107,9 @@ def log_image_with_boxes(
     if rank != 0:
         return
     _, key = _find_caller()
-    _log_counter[key] += 1
-    if not (interval == 1 or _log_counter[key] % interval == 1):
-        return
+    #_log_counter[key] += 1
+    #if not (interval == 1 or _log_counter[key] % interval == 1):
+    #    return
     if backend == "auto":
         if wandb is None:
             backend = "file"
@@ -124,6 +126,7 @@ def log_image_with_boxes(
     elif backend != "file":
         raise TypeError("backend must be file or wandb")
 
+    im_shape = image.shape[1:]
     if filename is None:
         filename = f"{_log_counter[key]}.jpg"
     if bbox_tag is not None:
@@ -131,28 +134,14 @@ def log_image_with_boxes(
     if img_norm_cfg is not None:
         image = color_transform(image, **img_norm_cfg)
     if labels is None:
-        labels = bboxes.new_zeros(bboxes.shape[0]).long()
+        labels = np.zeros_like(scores, dtype=np.long)
         class_names = ["foreground"]
-    if backend == "wandb":
-        im = {}
-        im["data_or_path"] = image
-        im["boxes"] = convert_box(
-           bbox_tag, bboxes, labels, class_names, scores=scores, std=image.shape[:2]
-        )
-        wandb.log({tag: wandb.Image(**im)}, commit=False)
-    elif backend == "file":
-        root_dir = os.environ.get("WORK_DIR", ".")
-
-        imshow_det_bboxes(
-            image,
-            bboxes.cpu().detach().numpy(),
-            labels.cpu().detach().numpy(),
-            class_names=class_names,
-            show=False,
-            out_file=os.path.join(root_dir, tag, bbox_tag, filename),
-        )
-    else:
-        raise TypeError("backend must be file or wandb")
+    im = {}
+    im["data_or_path"] = image
+    im["boxes"] = convert_box(
+        bbox_tag, bboxes, labels, class_names, scores=scores, std=im_shape
+    )
+    wandb.log({tag: wandb.Image(**im)}, commit=False)
 
 
 def log_every_n(msg: str, n: int = 50, level: int = logging.DEBUG, backend="auto"):
