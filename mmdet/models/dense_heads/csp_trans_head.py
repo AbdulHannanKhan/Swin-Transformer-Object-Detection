@@ -99,3 +99,22 @@ class CSPTransHead(CSPHead):
         # normal_init(self.csp_cls, std=0.01, bias=bias_cls)
         # normal_init(self.csp_reg, std=0.01)
         # normal_init(self.csp_offset, std=0.01)
+
+    def forward_single(self, x, reg_scale, offset_scale):
+        cls_feat = x
+        reg_feat = x
+        offset_feat = x
+
+        for cls_conv in self.cls_convs:
+            cls_feat = cls_conv(cls_feat)
+
+        for reg_conv in self.reg_convs:
+            reg_feat = reg_conv(reg_feat)
+
+        for offset_conv in self.offset_convs:
+            offset_feat = offset_conv(offset_feat)
+
+        cls_score = self.csp_cls(cls_feat)
+        bbox_pred = reg_scale(self.csp_reg(reg_feat)[0].float())
+        offset_pred = offset_scale(self.csp_offset(offset_feat)[0].float())
+        return cls_score, bbox_pred, offset_pred
