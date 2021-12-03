@@ -4,12 +4,13 @@ import shutil
 import tempfile
 import time
 
+import numpy as np
 import mmcv
 import torch
 import torch.distributed as dist
 from mmcv.image import tensor2imgs
 from mmcv.runner import get_dist_info
-
+from ..utils.logger import log_image_with_boxes
 from mmdet.core import encode_mask_results
 
 
@@ -66,7 +67,7 @@ def single_gpu_test(model,
     return results
 
 
-def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
+def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True):
     """Test model with multiple gpus.
 
     This method tests model with multiple gpus and collects the results
@@ -100,6 +101,16 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
                 result = [(bbox_results, encode_mask_results(mask_results))
                           for bbox_results, mask_results in result]
         results.extend(result)
+        if np.random.rand(1)[0] < model.module.val_img_log_prob and log:
+            log_image_with_boxes(
+                "proposals",
+                data["img"][0].data[0],
+                result[0][0][:, :4],
+                bbox_tag="rpn_pseudo_label",
+                scores=result[0][0][:, 4],
+                interval=500,
+                img_norm_cfg=data["img_metas"][0].data[0][0]["img_norm_cfg"],
+            )
 
         if rank == 0:
             batch_size = len(result)
