@@ -107,6 +107,59 @@ class CSPMaps(object):
 
 
 @PIPELINES.register_module()
+class RemoveSmallBoxes(object):
+    """Removes detections smaller than a threshold
+
+    This transform remove the small detections, intended to keep detector from
+    learning to classify small blobs which can result in high loss since these
+    examples will be very hard to train on given resolution
+
+    Args:
+        min_box_size (float or int): boxes below this threshold will be removed
+            hence area under the blob will be considered as background.
+        min_gt_box_size (float or int): boxes between min_gt_box_size and
+            min_box_size will be move to gt_bboxes_ignore and all boxes with
+            height greater than min_gt_box_size will be kept.
+    """
+    def __init__(self,
+                 min_box_size=6,
+                 min_gt_box_size=8,
+                 ):
+        super(RemoveSmallBoxes, self).__init__()
+        self.min_box_size = min_box_size
+        self.min_gt_box_size = min_gt_box_size
+
+    def __call__(self, results):
+
+        gt_bboxes = results["gt_bboxes"].copy()
+        if self.min_box_size <= 0 or gt_bboxes.shape[0] == 0:
+            return results
+
+        gt_bboxes_edges = gt_bboxes[:, [2, 3]] - gt_bboxes[:, [0, 1]]
+        keep_bboxes_inds = (gt_bboxes_edges.min(-1) >= self.min_gt_box_size).nonzero()[0]
+        rest_inds = (gt_bboxes_edges.min(-1) < self.min_gt_box_size).nonzero()[0]
+        rest_boxes = gt_bboxes[rest_inds]
+        rest_box_edges = gt_bboxes_edges[rest_inds]
+        ignore_bboxes_inds = (self.min_box_size <= rest_box_edges.min(-1)).nonzero()[0]
+        before = results['gt_bboxes_ignore'].shape[0] + results['gt_bboxes'].shape[0]
+        
+        if ignore_bboxes_inds.shape[0] > 0:
+            results['gt_bboxes_ignore'] = np.concatenate(
+                [results['gt_bboxes_ignore'], rest_boxes[ignore_bboxes_inds]], 0)
+        if keep_bboxes_inds.shape[0] > 0:
+            results['gt_bboxes'] = gt_bboxes[keep_bboxes_inds]
+            results['gt_labels'] = results['gt_labels'][keep_bboxes_inds]
+        assert (before - results['gt_bboxes_ignore'].shape[0] + results['gt_bboxes'].shape[0]) >= 0
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(discard_below={self.min_box_size}, '
+        repr_str += f'consider={self.min_gt_box_size}, '
+        return repr_str
+
+
+@PIPELINES.register_module()
 class Resize(object):
     """Resize images & bbox & mask.
 
