@@ -29,12 +29,12 @@ class CSPTransHead(CSPHead):
                  t_depths=[1],
                  t_patch_size=3,
                  **kwargs):
-        super(CSPTransHead, self).__init__(
-            *args,
-            **kwargs)
         self.t_heads = t_heads
         self.t_depths = t_depths
         self.t_patch_size = t_patch_size
+        super(CSPTransHead, self).__init__(
+            *args,
+            **kwargs)
 
     def _init_layers(self):
         """Initialize layers of the head."""
