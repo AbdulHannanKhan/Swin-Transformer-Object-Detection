@@ -114,7 +114,7 @@ class CSPTransHead(CSPHead):
         for offset_conv in self.offset_convs:
             offset_feat = offset_conv(offset_feat)
 
-        cls_score = self.csp_cls(cls_feat)
+        cls_score = self.csp_cls(cls_feat)[0]
         bbox_pred = reg_scale(self.csp_reg(reg_feat)[0].float())
         offset_pred = offset_scale(self.csp_offset(offset_feat)[0].float())
         return cls_score, bbox_pred, offset_pred
