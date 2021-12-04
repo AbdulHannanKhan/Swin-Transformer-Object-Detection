@@ -17,6 +17,8 @@ class SWAOptimizerHook(OptimizerHook):
                 runner.log_buffer.update({'grad_norm': float(grad_norm)},
                                          runner.outputs['num_samples'])
         runner.optimizer.step()
+
+    def after_train_epoch(self, runner):
         print("Performing SWA Swap ...")
         runner.optimizer.swap_swa_sgd()
         runner.optimizer.bn_update(runner.current_dl, runner.model)
