@@ -293,7 +293,7 @@ class SwinTransformer(nn.Module):
 
 
 @HEADS.register_module()
-class CSPTransHead(CSPHead):
+class CSPFullTransHead(CSPHead):
     def __init__(self,
                  *args,
                  t_heads=[1],
@@ -303,7 +303,7 @@ class CSPTransHead(CSPHead):
         self.t_heads = t_heads
         self.t_depths = t_depths
         self.t_patch_size = t_patch_size
-        super(CSPTransHead, self).__init__(
+        super(CSPFullTransHead, self).__init__(
             *args,
             **kwargs)
 
