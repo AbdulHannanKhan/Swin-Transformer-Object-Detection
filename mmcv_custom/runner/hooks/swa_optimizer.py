@@ -19,4 +19,4 @@ class SWAOptimizerHook(OptimizerHook):
         runner.optimizer.step()
         print("Performing SWA Swap ...")
         runner.optimizer.swap_swa_sgd()
-        runner.optimizer.bn_update(runner.train_loader, runner.model)
+        runner.optimizer.bn_update(runner.current_dl, runner.model)
