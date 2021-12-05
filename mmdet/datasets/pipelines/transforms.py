@@ -759,7 +759,7 @@ class RandomPave(object):
     def __init__(self, size):
         self.size = size
 
-    def random_pave(self, image):
+    def random_pave(self, image, gts, igs):
         img_height, img_width = image.shape[0:2]
         pave_h, pave_w = self.size
 
@@ -767,11 +767,20 @@ class RandomPave(object):
         pave_x = int(np.random.randint(0, pave_w - img_width + 1))
         pave_y = int(np.random.randint(0, pave_h - img_height + 1))
         paved_image[pave_y:pave_y + img_height, pave_x:pave_x + img_width] = image
+        # pave detections
+        if len(igs) > 0:
+            igs[:, 0:4:2] += pave_x
+            igs[:, 1:4:2] += pave_y
 
-        return paved_image
+        if len(gts) > 0:
+            gts[:, 0:4:2] += pave_x
+            gts[:, 1:4:2] += pave_y
+
+        return paved_image, gts, igs
 
     def __call__(self, results):
-        results['img'] = self.random_pave(results['img'])
+        results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'] = \
+            self.random_pave(results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'])
         return results
 
 
