@@ -3,6 +3,7 @@ import inspect
 
 import mmcv
 import numpy as np
+import cv2
 from numpy import random
 
 from mmdet.core import PolygonMasks
@@ -718,6 +719,60 @@ class Normalize(object):
         repr_str = self.__class__.__name__
         repr_str += f'(mean={self.mean}, std={self.std}, to_rgb={self.to_rgb})'
         return repr_str
+
+
+@PIPELINES.register_module()
+class RandomBrightness(object):
+    def __init__(self,
+                 _min=0.5,
+                 _max=2.0):
+
+        self.min = _min
+        self.max = _max
+
+    def _brightness(self, image):
+        '''
+        Randomly change the brightness of the input image.
+        Protected against overflow.
+        '''
+        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        random_br = np.random.uniform(self.min, self.max)
+
+        # To protect against overflow: Calculate a mask for all pixels
+        # where adjustment of the brightness would exceed the maximum
+        # brightness value and set the value to the maximum at those pixels.
+        mask = hsv[:, :, 2] * random_br > 255
+        v_channel = np.where(mask, 255, hsv[:, :, 2] * random_br)
+        hsv[:, :, 2] = v_channel
+
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    def __call__(self, results):
+
+        results["img"] = self._brightness(results["img"])
+        return results
+
+
+@PIPELINES.register_module()
+class RandomPave(object):
+
+    def __init__(self, size):
+        self.size = size
+
+    def random_pave(self, image):
+        img_height, img_width = image.shape[0:2]
+        pave_h, pave_w = self.size
+
+        paved_image = np.ones((pave_h, pave_w, 3), dtype=image.dtype) * np.mean(image, dtype=int)
+        pave_x = int(np.random.randint(0, pave_w - img_width + 1))
+        pave_y = int(np.random.randint(0, pave_h - img_height + 1))
+        paved_image[pave_y:pave_y + img_height, pave_x:pave_x + img_width] = image
+
+        return paved_image
+
+    def __call__(self, results):
+        results['img'] = self.random_pave(results['img'])
+        return results
 
 
 @PIPELINES.register_module()
