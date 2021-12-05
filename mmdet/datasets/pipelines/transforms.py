@@ -9,6 +9,7 @@ from numpy import random
 from mmdet.core import PolygonMasks
 from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
 from ..builder import PIPELINES
+from .compose import Compose as Comp
 
 try:
     from imagecorruptions import corrupt
@@ -750,6 +751,22 @@ class RandomBrightness(object):
     def __call__(self, results):
         if np.random.randint(0, 2) == 0:
             results["img"] = self._brightness(results["img"])
+        return results
+
+
+@PIPELINES.register_module()
+class OneOf(object):
+
+    def __init__(self, transforms, prob=0.5):
+        self.prob = prob
+        assert len(transforms) > 1
+        self.transforms = [Comp([p]) for p in transforms]
+
+    def __call__(self, results):
+
+        if np.random.rand(1)[0] < self.prob:
+            choice = np.random.choice(self.transforms)
+            return choice(results)
         return results
 
 
