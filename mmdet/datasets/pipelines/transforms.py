@@ -122,8 +122,8 @@ class RemoveSmallBoxes(object):
             height greater than min_gt_box_size will be kept.
     """
     def __init__(self,
-                 min_box_size=6,
-                 min_gt_box_size=8,
+                 min_box_size=8,
+                 min_gt_box_size=16,
                  ):
         super(RemoveSmallBoxes, self).__init__()
         self.min_box_size = min_box_size
@@ -132,24 +132,23 @@ class RemoveSmallBoxes(object):
     def __call__(self, results):
 
         gt_bboxes = results["gt_bboxes"].copy()
+        gt_bboxes_ignore = results["gt_bboxes_ignore"].copy()
         if self.min_box_size <= 0 or gt_bboxes.shape[0] == 0:
             return results
 
         gt_bboxes_edges = gt_bboxes[:, [2, 3]] - gt_bboxes[:, [0, 1]]
         keep_bboxes_inds = (gt_bboxes_edges.min(-1) >= self.min_gt_box_size).nonzero()[0]
-        rest_inds = (gt_bboxes_edges.min(-1) < self.min_gt_box_size).nonzero()[0]
-        rest_boxes = gt_bboxes[rest_inds]
-        rest_box_edges = gt_bboxes_edges[rest_inds]
-        ignore_bboxes_inds = (self.min_box_size <= rest_box_edges.min(-1)).nonzero()[0]
-        before = results['gt_bboxes_ignore'].shape[0] + results['gt_bboxes'].shape[0]
+
+        ign_box_edges = gt_bboxes_ignore[:, [2, 3]] - gt_bboxes_ignore[:, [0, 1]]
+        keep_ignore_inds = (ign_box_edges.min(-1) >= self.min_box_size).nonzero()[0]
         
-        if ignore_bboxes_inds.shape[0] > 0:
-            results['gt_bboxes_ignore'] = np.concatenate(
-                [results['gt_bboxes_ignore'], rest_boxes[ignore_bboxes_inds]], 0)
+        if keep_ignore_inds.shape[0] > 0:
+            results['gt_bboxes_ignore'] = results['gt_bboxes_ignore'][keep_ignore_inds]
+
         if keep_bboxes_inds.shape[0] > 0:
             results['gt_bboxes'] = gt_bboxes[keep_bboxes_inds]
             results['gt_labels'] = results['gt_labels'][keep_bboxes_inds]
-        assert (before - results['gt_bboxes_ignore'].shape[0] + results['gt_bboxes'].shape[0]) >= 0
+
         return results
 
     def __repr__(self):
