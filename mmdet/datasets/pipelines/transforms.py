@@ -748,8 +748,8 @@ class RandomBrightness(object):
         return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
     def __call__(self, results):
-
-        results["img"] = self._brightness(results["img"])
+        if np.random.randint(0, 2) == 0:
+            results["img"] = self._brightness(results["img"])
         return results
 
 
