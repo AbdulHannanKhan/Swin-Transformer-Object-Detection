@@ -93,10 +93,10 @@ def color_transform(img_tensor, mean, std, to_rgb=False):
 def log_image_with_boxes(
     tag: str,
     image: torch.Tensor,
-    bboxes: np.ndarray,
+    bboxes,
     bbox_tag: str = None,
     labels: np.ndarray = None,
-    scores: np.ndarray = None,
+    scores = None,
     class_names: Tuple[str] = None,
     filename: str = None,
     img_norm_cfg: dict = None,
@@ -110,6 +110,22 @@ def log_image_with_boxes(
     #_log_counter[key] += 1
     #if not (interval == 1 or _log_counter[key] % interval == 1):
     #    return
+    tboxes = []
+    labels = []
+    fscores = []
+
+    for i in range(len(bboxes)):
+        bbox, score, label = bboxes[i][:, :4], bboxes[i][:, 4], i
+        tboxes.append(bbox)
+        fscores.append(score)
+        labels.append(np.zeros(score.shape, np.int64) + label)
+
+    bboxes = np.concatenate(tboxes)
+    scores = np.concatenate(fscores)
+    labels = np.concatenate(labels)
+    if labels.shape[0] == 0:
+        return
+
     if backend == "auto":
         if wandb is None:
             backend = "file"
@@ -135,7 +151,7 @@ def log_image_with_boxes(
         image = color_transform(image, **img_norm_cfg)
     if labels is None:
         labels = np.zeros_like(scores, dtype=np.long)
-        class_names = ["foreground"]
+    class_names = ['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle' ,'pedestrain', 'traffic_cone', 'barrier']
     im = {}
     im["data_or_path"] = image
     im["boxes"] = convert_box(

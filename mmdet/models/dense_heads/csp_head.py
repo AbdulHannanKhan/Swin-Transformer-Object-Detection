@@ -36,14 +36,18 @@ class CSPHead(AnchorFreeHead):
                  loss_bbox=dict(type='RegLoss', loss_weight=0.01),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
                  num_classes=1,
+                 predict_width=True,
+                 wh_ratio=0.41,
                  **kwargs):
         super(CSPHead, self).__init__(
-            num_classes=1,
+            num_classes=num_classes,
             norm_cfg=norm_cfg,
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
             **kwargs)
 
+        self.wh_ratio = wh_ratio
+        self.predict_width = predict_width
         self.regress_ranges = regress_ranges
         self.loss_offset = build_loss(loss_offset)
 
@@ -85,8 +89,8 @@ class CSPHead(AnchorFreeHead):
                     norm_cfg=self.norm_cfg,
                     bias=self.norm_cfg is None))
 
-            self.csp_cls = nn.Conv2d( self.feat_channels, self.cls_out_channels, 3, padding=1)
-            self.csp_reg = nn.Conv2d(self.feat_channels, 1, 3, padding=1)
+            self.csp_cls = nn.Conv2d(self.feat_channels, self.cls_out_channels, 3, padding=1)
+            self.csp_reg = nn.Conv2d(self.feat_channels, 2, 3, padding=1)
             self.csp_offset = nn.Conv2d(self.feat_channels, 2, 3, padding=1)
 
             self.reg_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
@@ -248,7 +252,7 @@ class CSPHead(AnchorFreeHead):
             result_list.append(det_bboxes)
         return result_list
 
-    def csp_height2bbox(self, points, heights, offsets, stride=1, wh_ratio=0.41, max_shape=None):
+    def cspdet2bbox(self, points, scales, offsets, stride=1, max_shape=None):
         """Decode height and offset prediction to bounding box.
             Args:
                 points (Tensor): Shape (n, 2), [x, y].
@@ -263,10 +267,14 @@ class CSPHead(AnchorFreeHead):
         x = points[:, 0] + (offsets[:, 1]) * stride
         y = points[:, 1] + (offsets[:, 0]) * stride
 
-        heights = heights[..., 0] * stride
-        x1 = x - wh_ratio * heights / 2
+        heights = scales[..., 0] * stride
+        if self.predict_width:
+            widths = scales[..., 1] * stride
+        else:
+            widths = heights * self.wh_ratio
+        x1 = x - widths / 2
         y1 = y - heights * 0.5
-        x2 = x + wh_ratio * heights / 2
+        x2 = x + widths / 2
         y2 = y + heights * 0.5
 
         if max_shape is not None:
@@ -295,7 +303,7 @@ class CSPHead(AnchorFreeHead):
             # self.show_debug_info(cls_score, bbox_pred, offset_pred, stride)
             scores = cls_score.permute(1, 2, 0).reshape(
                 -1, self.cls_out_channels).sigmoid()
-            bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 1).exp()
+            bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 2 if self.predict_width else 1).exp()
             offset_pred = offset_pred.permute(1, 2, 0).reshape(-1, 2)
 
             nms_pre = self.test_cfg.get('nms_pre', -1)
@@ -306,7 +314,7 @@ class CSPHead(AnchorFreeHead):
                 bbox_pred = bbox_pred[topk_inds, :]
                 scores = scores[topk_inds, :]
                 offset_pred = offset_pred[topk_inds, :]
-            bboxes = self.csp_height2bbox(points, bbox_pred, offset_pred, stride=stride, max_shape=img_shape)
+            bboxes = self.cspdet2bbox(points, bbox_pred, offset_pred, stride=stride, max_shape=img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
         det_bboxes = torch.cat(mlvl_bboxes)

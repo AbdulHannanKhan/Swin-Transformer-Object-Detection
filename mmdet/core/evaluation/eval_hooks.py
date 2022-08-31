@@ -7,8 +7,6 @@ import torch.distributed as dist
 from mmcv.runner import Hook
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.utils.data import DataLoader
-from .eval_mr import COCOeval as COCOMReval
-from mmdet.utils import get_root_logger
 
 
 class EvalHook(Hook):
@@ -72,8 +70,6 @@ class EvalHook(Hook):
         self.save_best = save_best
         self.eval_kwargs = eval_kwargs
         self.initial_epoch_flag = True
-
-        self.logger = get_root_logger()
 
         if self.save_best is not None:
             self._init_rule(rule, self.save_best)
@@ -169,36 +165,10 @@ class EvalHook(Hook):
                 last_ckpt,
                 osp.join(runner.work_dir, f'best_{self.key_indicator}.pth'))
             time_stamp = runner.epoch + 1 if self.by_epoch else runner.iter + 1
-            self.logger.info(f'Now best checkpoint is epoch_{time_stamp}.pth.'
+            runner.logger.info(f'Now best checkpoint is epoch_{time_stamp}.pth.'
                              f'Best {self.key_indicator} is {best_score:0.4f}')
 
     def evaluate(self, runner, results):
-        tmp_file = osp.join(runner.work_dir, 'temp_0')
-        result_files = self.dataloader.dataset.results2json(results, "./work_dirs/st/latest")
-
-        cocoGt = self.dataloader.dataset.coco
-        imgIds = cocoGt.getImgIds()
-        try:
-            bbox_file = result_files["bbox"]
-            cocoDt = cocoGt.loadRes(bbox_file)
-        except IndexError:
-            print('No prediction found.')
-            return
-        metrics = ['MR_Reasonable', 'MR_Small', 'MR_Middle', 'MR_Large', 'MR_Bare', 'MR_Partial', 'MR_Heavy', 'MR_R+HO']
-        cocoEval = COCOMReval(cocoGt, cocoDt, 'bbox')
-        cocoEval.params.imgIds = imgIds
-        for id_setup in range(0,8):
-            cocoEval.evaluate(id_setup)
-            cocoEval.accumulate()
-            cocoEval.summarize(id_setup)
-            
-            key = '{}'.format(metrics[id_setup])
-            val = float('{:.3f}'.format(cocoEval.stats[id_setup]))
-            runner.log_buffer.output[key] = val
-        runner.log_buffer.ready = True
-
-        return None
-        
         eval_res = self.dataloader.dataset.evaluate(
             results, logger=runner.logger, **self.eval_kwargs)
         for name, val in eval_res.items():

@@ -7,7 +7,7 @@ from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner,
                          Fp16OptimizerHook, build_optimizer,
                          build_runner)
-from mmcv_custom.runner.hooks import MeanTeacherOptimizerHook
+from mmcv_custom.runner.hooks import MeanTeacherOptimizerHook, SWAOptimizerHook
 from mmcv.utils import build_from_cfg
 
 from mmdet.core import DistEvalHook, EvalHook
@@ -19,6 +19,9 @@ try:
     import apex
 except:
     print('apex is not installed')
+
+import torch
+torch.autograd.set_detect_anomaly(True)
 
 
 def set_random_seed(seed, deterministic=False):
@@ -134,6 +137,9 @@ def train_detector(model,
             **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
     elif distributed and 'type' not in cfg.optimizer_config:
         optimizer_config = MeanTeacherOptimizerHook(**cfg.optimizer_config)
+    elif distributed and 'type' in cfg.optimizer_config:
+        type = cfg.optimizer_config.pop('type')
+        optimizer_config = SWAOptimizerHook(**cfg.optimizer_config)
     else:
         optimizer_config = cfg.optimizer_config
 
@@ -183,4 +189,5 @@ def train_detector(model,
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
+    torch.autograd.set_detect_anomaly(True)
     runner.run(data_loaders, cfg.workflow)

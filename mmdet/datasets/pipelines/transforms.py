@@ -27,11 +27,13 @@ except ImportError:
 @PIPELINES.register_module()
 class CSPMaps(object):
 
-    def __init__(self, radius=8, stride=4, regress_range=(-1, 1e8), image_shape=None):
+    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), image_shape=None, num_classes=1):
         self.radius = radius
         self.stride = stride
         self.regress_range = regress_range
         self.image_shape = image_shape
+        self.num_classes = num_classes
+        self.with_width=with_width
 
     def __call__(self, results):
         """Call function to add csp maps to train pipeline.
@@ -43,13 +45,13 @@ class CSPMaps(object):
             dict: results, 'pos_map', 'scale_map', 'offset_map', keys are added into result dict.
         """
 
-        gts, igs = results['gt_bboxes'], results['gt_bboxes_ignore']
-        pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs)
+        gts, igs, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_labels']
+        pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs, labels, self.num_classes)
         results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
 
         return results
 
-    def calc_gt_center(self, gts, igs):
+    def calc_gt_center(self, gts, igs, labels=None, classes=1):
 
         image_shape = self.image_shape
         radius = self.radius
@@ -62,16 +64,17 @@ class CSPMaps(object):
             dx = np.exp(-np.square(np.arange(kernel) - int(kernel / 2)) / s)
             return np.reshape(dx, (-1, 1))
         radius = int(radius/stride)
-        scale_map = np.zeros((2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        scale_map = np.zeros((3 if self.with_width else 2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
         offset_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
-        pos_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
-        pos_map[1, :, :, ] = 1  # channel 0: loss weights; channel 1: for ignore, ignore area will be set to 0; channel 2: classification
+        pos_map = np.zeros((2*classes+1, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+
+        pos_map[0, :, :, ] = 1  # channel 0 : for ignore; channel 1+2*i: for loss weights , ignore area will be set to 0; channel 2+2*i: classification
 
         if not igs is None and len(igs) > 0:
             igs = igs / stride
             for ind in range(len(igs)):
                 x1, y1, x2, y2 = int(igs[ind, 0]), int(igs[ind, 1]), int(np.ceil(igs[ind, 2])), int(np.ceil(igs[ind, 3]))
-                pos_map[1, y1:y2, x1:x2] = 0
+                pos_map[0, y1:y2, x1:x2] = 0
         half_height = gts[:, 3] - gts[:, 1]
         half_height = (half_height >= regress_range[0]) & (half_height <= regress_range[1])
         inds = half_height.nonzero()
@@ -86,12 +89,14 @@ class CSPMaps(object):
                 dy = gaussian(y2-y1)
                 gau_map = np.multiply(dy, np.transpose(dx))
 
-                pos_map[0, y1:y2, x1:x2] = np.maximum(pos_map[0, y1:y2, x1:x2], gau_map)  # gauss map
-                pos_map[1, y1:y2, x1:x2] = 1  # 1-mask map
-                pos_map[2, c_y, c_x] = 1  # center map
+                pos_map[1+2*labels[ind], y1:y2, x1:x2] = np.maximum(pos_map[1+2*labels[ind], y1:y2, x1:x2], gau_map)  # gauss map
+                pos_map[0, y1:y2, x1:x2] = 1  # 1-mask map
+                pos_map[2+2*labels[ind], c_y, c_x] = 1  # center map
 
                 scale_map[0, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 3] - gts[ind, 1])  #value of height
-                scale_map[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1  # 1-mask
+                if self.with_width:
+                    scale_map[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 2] - gts[ind, 0])
+                scale_map[-1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1  # 1-mask
 
                 offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
                 offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset

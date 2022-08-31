@@ -18,7 +18,8 @@ def sigmoid(x, derivative=False):
 class RegLoss(nn.Module):
     def __init__(self,
                  reduction='none',
-                 loss_weight=0.1):
+                 loss_weight=0.1,
+                 reg_param_count=2):
         """RegLoss.
 
         Args:
@@ -30,6 +31,7 @@ class RegLoss(nn.Module):
         assert reduction in (None, 'none', 'mean', 'sum')
         self.reduction = reduction
         self.loss_weight = loss_weight
+        self.reg_param_count = reg_param_count
         self.l1 = nn.L1Loss(reduction=self.reduction)
 
     def forward(self,
@@ -44,10 +46,18 @@ class RegLoss(nn.Module):
         Returns:
             torch.Tensor: The calculated loss
         """
-        l1_loss = h_label[:, 1, :, :] * self.l1(h_pred[:, 0, :, :] / (h_label[:, 0, :, :] + 1e-10),
-                                                      h_label[:, 0, :, :] / (h_label[:, 0, :, :] + 1e-10))
+        l1_loss = h_label[:, -1, :, :]*self.l1(h_pred[:, 0, :, :]/(h_label[:, 0, :, :]+1e-10),
+                                                    h_label[:, 0, :, :]/(h_label[:, 0, :, :]+1e-10))
 
-        reg_loss = torch.sum(l1_loss) / max(1.0, torch.sum(h_label[:, 1, :, :]))
+        for i in range(1, self.reg_param_count):
+            l1_loss = l1_loss + h_label[:, -1, :, :] * self.l1(h_pred[:, i, :, :] / (h_label[:, i, :, :] + 1e-10),
+                                          h_label[:, i, :, :] / (h_label[:, i, :, :] + 1e-10))
+
+        # pos_points = h_label[:,1,:,:].reshape(-1).nonzero()
+        # if pos_points.shape[0] != 0:
+        #     print(h_pred[:, 0,:,:].reshape(-1)[pos_points])
+        #     print(h_label[:,0,:,:].reshape(-1)[pos_points])
+        reg_loss = torch.sum(l1_loss) / max(1.0, torch.sum(h_label[:, -1, :, :])*self.reg_param_count)
         return self.loss_weight * reg_loss
 
 
@@ -121,17 +131,30 @@ class CenterLoss(nn.Module):
         Returns:
             torch.Tensor: The calculated loss
         """
-        log_loss = self.bce(pos_pred[:, 0, :, :], pos_label[:, 2, :, :])
-        pos_pred = pos_pred.sigmoid()
+        classes = pos_pred.shape[1]
+        cls_loss = None
+        pos_pred_sgm = pos_pred.sigmoid()
+        assigned_box = 0
 
-        positives = pos_label[:, 2, :, :]
-        negatives = pos_label[:, 1, :, :] - pos_label[:, 2, :, :]
+        for i in range(classes):
+            ignore_ind = 0
+            mask_ind = 1 + 2*i
+            center_ind = 2 + 2*i
+            
+            log_loss = self.bce(pos_pred[:, i, :, :], pos_label[:, center_ind, :, :])
 
-        fore_weight = positives * (1.0 - pos_pred[:, 0, :, :]) ** 2
-        back_weight = negatives * ((1.0 - pos_label[:, 0, :, :]) ** self.beta) * (pos_pred[:, 0, :, :] ** self.alpha)
-        focal_weight = fore_weight + back_weight
+            positives = pos_label[:, center_ind, :, :]
+            negatives = pos_label[:, ignore_ind, :, :] - pos_label[:, center_ind, :, :]
 
-        assigned_box = torch.sum(pos_label[:, 2, :, :])
+            fore_weight = positives * (1.0 - pos_pred_sgm[:, i, :, :]) ** 2
+            back_weight = negatives * ((1.0 - pos_label[:, mask_ind, :, :]) ** self.beta) * (pos_pred_sgm[:, i, :, :] ** self.alpha)
+            focal_weight = fore_weight + back_weight
 
-        cls_loss = torch.sum(focal_weight * log_loss) / max(1.0, assigned_box)
+            assigned_box += torch.sum(pos_label[:, center_ind, :, :])
+
+            if cls_loss is not None:
+                cls_loss = cls_loss + torch.sum(focal_weight * log_loss)
+            else:
+                cls_loss = torch.sum(focal_weight * log_loss)
+        cls_loss = cls_loss / assigned_box
         return self.loss_weight * cls_loss

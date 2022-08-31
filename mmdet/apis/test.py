@@ -89,25 +89,29 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True)
     model.eval()
     results = []
     dataset = data_loader.dataset
+    delta = 0
+    count = 0
     rank, world_size = get_dist_info()
     if rank == 0:
         prog_bar = mmcv.ProgressBar(len(dataset))
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     for i, data in enumerate(data_loader):
+        st = time.time()
         with torch.no_grad():
             result = model(return_loss=False, rescale=True, **data)
+            delta += time.time() - st
+            count += 1
             # encode mask results
             if isinstance(result[0], tuple):
                 result = [(bbox_results, encode_mask_results(mask_results))
                           for bbox_results, mask_results in result]
         results.extend(result)
-        if np.random.rand(1)[0] < model.module.val_img_log_prob and log:
+        if np.random.rand(1)[0] < 0.001 and log:
             log_image_with_boxes(
                 "proposals",
                 data["img"][0].data[0],
-                result[0][0][:, :4],
+                result[0],
                 bbox_tag="rpn_pseudo_label",
-                scores=result[0][0][:, 4],
                 interval=500,
                 img_norm_cfg=data["img_metas"][0].data[0][0]["img_norm_cfg"],
             )
@@ -122,6 +126,7 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True)
         results = collect_results_gpu(results, len(dataset))
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)
+    print("\nImg/sec: ", int(count / delta * 1000) / 1000)
     return results
 
 

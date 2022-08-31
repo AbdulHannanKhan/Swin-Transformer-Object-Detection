@@ -252,8 +252,8 @@ class COCOeval:
         # dt = [d for d in dt if d['height'] >= hRng[0] / self.params.expFilter and d['height'] < hRng[1] * self.params.expFilter]
         # dtind = np.array([int(d['id'] - dt[0]['id']) for d in dt])
         dtind = [i for i in range(len(dt))]
-#         dtind = [i for i in range(len(dt)) if dt[i]['bbox'][3] >= hRng[0] / self.params.expFilter and dt[i]['bbox'][3] < hRng[1] * self.params.expFilter]
-#         dt = [d for d in dt if d['bbox'][3] >= hRng[0] / self.params.expFilter and d['bbox'][3] < hRng[1] * self.params.expFilter]
+        dtind = [i for i in range(len(dt)) if dt[i]['bbox'][3] >= hRng[0] / self.params.expFilter and dt[i]['bbox'][3] < hRng[1] * self.params.expFilter]
+        dt = [d for d in dt if d['bbox'][3] >= hRng[0] / self.params.expFilter and d['bbox'][3] < hRng[1] * self.params.expFilter]
         # if np.max(dtind)>1000:
         #     pass
 
@@ -382,7 +382,7 @@ class COCOeval:
                     continue
                 tps = np.logical_and(dtm, np.logical_not(dtIg))
                 fps = np.logical_and(np.logical_not(dtm), np.logical_not(dtIg))
-                
+
                 for t, (tp, fp) in enumerate(zip(tps, fps)):
                     inds = np.where(dtIg[t]==0)[0]
                     tp = tp[inds]
@@ -391,7 +391,7 @@ class COCOeval:
 
                     tp = np.cumsum(tp).astype(dtype=np.float)
                     fp = np.cumsum(fp).astype(dtype=np.float)
-                    
+
                     tp = np.array(tp)
                     fppi = np.array(fp)/I0
                     nd = len(tp)
@@ -493,20 +493,20 @@ class Params:
 
         self.iouThrs = np.array([0.5])  # np.linspace(.5, 0.95, np.round((0.95 - .5) / .05) + 1, endpoint=True)
 
-        # self.HtRng = [[50, 1e5 ** 2], [50,75], [50, 1e5 ** 2], [20, 1e5 ** 2]]
-        # self.VisRng = [[0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.2,0.65], [0.2, 1e5 ** 2]]
-        # self.SetupLbl = ['Reasonable', 'Reasonable_small','Reasonable_occ=heavy', 'All']
+        self.HtRng = [[50, 1e5 ** 2], [50,75], [50, 1e5 ** 2], [20, 1e5 ** 2]]
+        self.VisRng = [[0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.2,0.65], [0.2, 1e5 ** 2]]
+        self.SetupLbl = ['Reasonable', 'Reasonable_small','Reasonable_occ=heavy', 'All']
 
-        self.HtRng = [[50, 1e5 ** 2], [50, 75], [75, 100], [100, 1e5 ** 2]]
-        self.VisRng = [[0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.65, 1e5 ** 2]]
-        self.SetupLbl = ['Reasonable', 'small', 'middle', 'large']
+        # self.HtRng = [[50, 1e5 ** 2], [50, 75], [75, 100], [100, 1e5 ** 2]]
+        # self.VisRng = [[0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.65, 1e5 ** 2], [0.65, 1e5 ** 2]]
+        # self.SetupLbl = ['Reasonable', 'small', 'middle', 'large']
 
         #self.HtRng = [[50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2]]
         #self.VisRng = [[0.65, 1e5 ** 2], [0.9, 1e5 ** 2], [0.65, 0.9], [0, 0.65]]
         #self.SetupLbl = ['Reasonable', 'bare', 'partial', 'heavy']
-        self.HtRng += [ [50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2]]
-        self.VisRng += [ [0.9, 1e5 ** 2], [0.65, 0.9], [0.2, 0.65], [0.2, 1e5 **2]]
-        self.SetupLbl += ['bare', 'partial', 'heavy', 'R+HO']
+        # self.HtRng += [ [50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2], [50, 1e5 ** 2]]
+        # self.VisRng += [ [0.9, 1e5 ** 2], [0.65, 0.9], [0.2, 0.65], [0.2, 1e5 **2]]
+        # self.SetupLbl += ['bare', 'partial', 'heavy', 'R+HO']
 
 
     def __init__(self, iouType='segm'):

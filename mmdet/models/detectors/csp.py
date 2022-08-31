@@ -22,6 +22,8 @@ class CSP(SingleStageDetector):
         self.bbox_head.test_cfg = test_cfg.csp_head
         self.bbox_head.train_cfg = train_cfg.csp_head
         self.val_img_log_prob = val_img_log_prob
+        if hasattr(self.neck, 'backlinks'):
+            self.neck.backlinks.append(self)
 
     def forward_train(self,
                       img,
@@ -72,8 +74,8 @@ class CSP(SingleStageDetector):
                 corresponds to each class.
         """
         batch_size = len(img_metas)
-        assert batch_size == 1, 'Currently only batch_size 1 for inference ' \
-            f'mode is supported. Found batch_size {batch_size}.'
+        # assert batch_size == 1, 'Currently only batch_size 1 for inference ' \
+        #     f'mode is supported. Found batch_size {batch_size}.'
         x = self.extract_feat(img)
         outs = self.bbox_head(x, img_metas)
         bbox_list = self.bbox_head.get_bboxes(

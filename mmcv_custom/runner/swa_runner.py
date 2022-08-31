@@ -13,7 +13,7 @@ from torchcontrib.optim import SWA
 @RUNNERS.register_module()
 class SWARunner(EpochBasedRunner):
 
-    def __init__(self, *args, swa_start=10, swa_freq=1, swa_lr=0.0005, **kwargs):
+    def __init__(self, *args, swa_start=100, swa_freq=10, swa_lr=0.005, **kwargs):
         super(SWARunner, self).__init__(*args, **kwargs)
         self.current_dl = None
         self.optimizer = SWA(self.optimizer, swa_start=swa_start, swa_freq=swa_freq, swa_lr=swa_lr)

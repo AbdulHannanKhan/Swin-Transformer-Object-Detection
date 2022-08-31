@@ -212,8 +212,9 @@ class CocoDataset(CustomDataset):
                 data['image_id'] = img_id
                 data['bbox'] = self.xyxy2xywh(bboxes[i])
                 data['score'] = float(bboxes[i][4])
-                data['category_id'] = 1
+                data['category_id'] = self.cat_ids[label]
                 json_results.append(data)
+        
         return json_results
 
     def _det2json(self, results):
@@ -229,8 +230,9 @@ class CocoDataset(CustomDataset):
                     data['image_id'] = img_id
                     data['bbox'] = self.xyxy2xywh(bboxes[i])
                     data['score'] = float(bboxes[i][4])
-                    data['category_id'] = 1
+                    data['category_id'] = self.cat_ids[label]
                     json_results.append(data)
+        
         return json_results
 
     def _segm2json(self, results):
@@ -403,30 +405,31 @@ class CocoDataset(CustomDataset):
             dict[str, float]: COCO style evaluation metric.
         """
 
-        result_files = self.results2json(results, "./work_dirs/st/latest")
+        if "mr2" in metric:
+            result_files = self.results2json(results, "./work_dirs/st/latest")
 
-        cocoGt = self.coco
-        imgIds = cocoGt.getImgIds()
-        try:
-            bbox_file = result_files["bbox"]
-            cocoDt = cocoGt.loadRes(bbox_file)
-        except IndexError:
-            print('No prediction found.')
-            return
-        metrics = ['MR_Reasonable', 'MR_Small', 'MR_Middle', 'MR_Large', 'MR_Bare', 'MR_Partial', 'MR_Heavy', 'MR_R+HO']
-        cocoEval = COCOMReval(cocoGt, cocoDt, 'bbox')
-        cocoEval.params.imgIds = imgIds
-        output = dict()
-        for id_setup in range(0, 8):
-            cocoEval.evaluate(id_setup)
-            cocoEval.accumulate()
-            cocoEval.summarize(id_setup)
+            cocoGt = self.coco
+            imgIds = cocoGt.getImgIds()
+            try:
+               bbox_file = result_files["bbox"]
+               cocoDt = cocoGt.loadRes(bbox_file)
+            except IndexError:
+               print('No prediction found.')
+               return
+            metrics = ['Reasonable', 'Small', 'Heavy', 'ALL']
+            cocoEval = COCOMReval(cocoGt, cocoDt, 'bbox')
+            cocoEval.params.imgIds = imgIds
+            output = dict()
+            for id_setup in range(4):
+               cocoEval.evaluate(id_setup)
+               cocoEval.accumulate()
+               cocoEval.summarize(id_setup)
 
-            key = '{}'.format(metrics[id_setup])
-            val = float('{:.3f}'.format(cocoEval.stats[id_setup]))
-            output[key] = val
+               key = '{}'.format(metrics[id_setup])
+               val = float('{:.3f}'.format(cocoEval.stats[id_setup]))
+               output[key] = val
 
-        return output
+            return output
 
         metrics = metric if isinstance(metric, list) else [metric]
         allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
