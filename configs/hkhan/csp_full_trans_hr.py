@@ -54,7 +54,10 @@ model = dict(
         num_outs=1,
     ),
     bbox_head=dict(
-        type='CSPHead',
+        type='CSPFullTransHead',
+        t_heads=[1],
+        t_depths=[1],
+        t_patch_size=1,
         num_classes=1,
         in_channels=768,
         stacked_convs=1,
@@ -113,11 +116,11 @@ train_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
     dict(type='RandomFlip', flip_ratio=0.5),
+    dict(type='RandomBrightness'),
     dict(type='RemoveSmallBoxes', min_box_size=1, min_gt_box_size=8),
     dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.5)),
-    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=16),
     dict(type='RandomCrop', crop_size=img_scale),
-    dict(type='RandomBrightness'),
+    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=16),
     dict(type='RandomPave', size=img_scale),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='CSPMaps', radius=8, stride=4, regress_range=(-1, 1e8), image_shape=img_scale),
@@ -173,10 +176,10 @@ data = dict(
     ),
 )
 
-optimizer = dict(_delete_=True, type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
-lr_config = dict(step=[80], policy='step', warmup='constant', warmup_iters=250, warmup_ratio=1.0/3,)
-runner = dict(type='SWARunner', max_epochs=120)
-optimizer_config=dict(_delete_=True, type="SWAOptimizerHook", grad_clip=dict(max_norm=35, norm_type=2))
+optimizer = dict(_delete_=True, type='Adam', lr=0.0002)
+lr_config = dict(step=[65], policy='step', warmup='constant', warmup_iters=250, warmup_ratio=1.0/3,)
+runner = dict(type='MeanTeacherRunner', max_epochs=80)
+optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 # do not use mmdet version fp16
 fp16 = None
 # optimizer_config = dict(
@@ -195,8 +198,8 @@ log_config = dict(
         dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
-                project="CSP",
-                name="SWA",
+                project="CSPFullTrans",
+                name="Adv",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -208,5 +211,5 @@ log_config = dict(
 )
 
 
-#load_from="./work_dirs/csp_r50_adv/epoch_43.pth"
+#load_from="./work_dirs/csp_full_trans_hr/epoch_35.pth"
 

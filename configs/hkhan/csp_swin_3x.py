@@ -6,6 +6,7 @@ _base_ = [
 model = dict(
     type='CSP',
     pretrained=None,
+    val_img_log_prob=0.02,
     backbone=dict(
         type='SwinTransformer',
         embed_dim=96,
@@ -84,7 +85,7 @@ img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 
 # augmentation strategy originates from DETR / Sparse RCNN
-img_scale = (2048, 1024)
+img_scale = (1024, 2048)
 train_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
@@ -122,7 +123,7 @@ data = dict(
     workers_per_gpu=2,
     train=dict(
         classes=['pedestrain',],
-        ann_file="./data/cp/train_trunk.json",
+        ann_file="./data/cp/train.json",
         img_prefix="/netscratch/hkhan/cp/leftImg8bit_trainvaltest/",
         # img_prefix="/home/akhan/projects/Pedestron/datasets/CityPersons/leftImg8bit_trainvaltest/",
         pipeline=train_pipeline,
@@ -143,9 +144,9 @@ data = dict(
     ),
 )
 
-optimizer = dict(_delete_=True, type='Adam', lr=0.0002)
-lr_config = dict(step=[85, 105], policy='step', warmup='constant', warmup_iters=250, warmup_ratio=1.0/3, gamma=(0.1)**0.5)
-runner = dict(type='MeanTeacherRunner', max_epochs=120)
+optimizer = dict(_delete_=True, type='Adam', lr=0.0001)
+lr_config = dict(step=[180, 215], policy='step', warmup='constant', warmup_iters=250, warmup_ratio=2.0/3, gamma=(0.1)**0.5)
+runner = dict(type='MeanTeacherRunner', max_epochs=240)
 optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 fp16 = None
 evaluation = dict(type="DistEvalHook", interval=1)
