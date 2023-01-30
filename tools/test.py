@@ -1,7 +1,7 @@
 import argparse
 import os
 import warnings
-
+import json
 import mmcv
 import torch
 from mmcv import Config, DictAction
@@ -110,7 +110,7 @@ def main():
     if args.eval and args.format_only:
         raise ValueError('--eval and --format_only cannot be both specified')
 
-    if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
+    if args.out is not None and not args.out.endswith(('.pkl', '.pickle', '.json')):
         raise ValueError('The output file must be a pkl file.')
 
     cfg = Config.fromfile(args.config)
@@ -200,7 +200,8 @@ def main():
     if rank == 0:
         if args.out:
             print(f'\nwriting results to {args.out}')
-            mmcv.dump(outputs, args.out)
+            with open(args.out, 'w+') as f:
+                json.dump(outputs, f)
         kwargs = {} if args.eval_options is None else args.eval_options
         if args.format_only:
             dataset.format_results(outputs, **kwargs)

@@ -32,6 +32,8 @@ from .csp_head import CSPHead
 from .csp_trans_head import CSPTransHead
 from .csp_full_trans import CSPFullTransHead
 from .dfdn import DFDN
+from .csp_ttc_head import CSPTTCHead
+# from .fcos_tti_head import FCOSTTIHead
 
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
@@ -42,5 +44,5 @@ __all__ = [
     'YOLACTSegmHead', 'YOLACTProtonet', 'YOLOV3Head', 'PAAHead',
     'SABLRetinaHead', 'CentripetalHead', 'VFNetHead', 'TransformerHead',
     'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead',
-    'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN'
+    'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN', 'CSPTTCHead' # 'FCOSTTIHead',
 ]

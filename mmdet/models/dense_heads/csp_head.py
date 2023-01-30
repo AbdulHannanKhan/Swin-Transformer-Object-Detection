@@ -303,6 +303,7 @@ class CSPHead(AnchorFreeHead):
             # self.show_debug_info(cls_score, bbox_pred, offset_pred, stride)
             scores = cls_score.permute(1, 2, 0).reshape(
                 -1, self.cls_out_channels).sigmoid()
+
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 2 if self.predict_width else 1).exp()
             offset_pred = offset_pred.permute(1, 2, 0).reshape(-1, 2)
 

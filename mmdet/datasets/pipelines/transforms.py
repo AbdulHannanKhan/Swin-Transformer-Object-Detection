@@ -5,6 +5,7 @@ import mmcv
 import numpy as np
 import cv2
 from numpy import random
+import math
 
 from mmdet.core import PolygonMasks
 from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
@@ -27,13 +28,14 @@ except ImportError:
 @PIPELINES.register_module()
 class CSPMaps(object):
 
-    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), image_shape=None, num_classes=1):
+    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False, image_shape=None, num_classes=1):
         self.radius = radius
         self.stride = stride
         self.regress_range = regress_range
         self.image_shape = image_shape
         self.num_classes = num_classes
         self.with_width=with_width
+        self.with_ttc = with_ttc
 
     def __call__(self, results):
         """Call function to add csp maps to train pipeline.
@@ -45,13 +47,18 @@ class CSPMaps(object):
             dict: results, 'pos_map', 'scale_map', 'offset_map', keys are added into result dict.
         """
 
-        gts, igs, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_labels']
-        pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs, labels, self.num_classes)
-        results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
+        if self.with_ttc:
+            gts, igs, ttc, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results["gt_tti"], results['gt_labels']
+            pos_map, scale_map, offset_map, ttc = self.calc_gt_center(gts, igs, labels, self.num_classes, ttc=ttc)
+            results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map, ttc_maps=ttc))
+        else:
+            gts, igs, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_labels']
+            pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs, labels, self.num_classes)
+            results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
 
         return results
 
-    def calc_gt_center(self, gts, igs, labels=None, classes=1):
+    def calc_gt_center(self, gts, igs, labels=None, classes=1, ttc=None):
 
         image_shape = self.image_shape
         radius = self.radius
@@ -67,6 +74,8 @@ class CSPMaps(object):
         scale_map = np.zeros((3 if self.with_width else 2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
         offset_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
         pos_map = np.zeros((2*classes+1, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        if ttc is not None:
+            ttc_maps = np.zeros((2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
 
         pos_map[0, :, :, ] = 1  # channel 0 : for ignore; channel 1+2*i: for loss weights , ignore area will be set to 0; channel 2+2*i: classification
 
@@ -79,11 +88,16 @@ class CSPMaps(object):
         half_height = (half_height >= regress_range[0]) & (half_height <= regress_range[1])
         inds = half_height.nonzero()
         gts = gts[inds]
+        if ttc is not None:
+            ttc = ttc[inds]
         if len(gts) > 0:
             gts = gts / stride
             for ind in range(len(gts)):
                 x1, y1, x2, y2 = int(np.ceil(gts[ind, 0])), int(np.ceil(gts[ind, 1])), int(gts[ind, 2]), int(gts[ind, 3])
                 c_x, c_y = int((gts[ind, 0] + gts[ind, 2]) / 2), int((gts[ind, 1] + gts[ind, 3]) / 2)
+
+                if ttc is not None:
+                    bbox_ttc = ttc[ind]
 
                 dx = gaussian(x2-x1)
                 dy = gaussian(y2-y1)
@@ -98,10 +112,23 @@ class CSPMaps(object):
                     scale_map[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 2] - gts[ind, 0])
                 scale_map[-1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1  # 1-mask
 
+                if ttc is not None:
+                    if not(np.isnan(bbox_ttc) or bbox_ttc == 0):
+                        frame_capture_frequency = 12
+                        if 0 < bbox_ttc < 1/frame_capture_frequency:
+                            bbox_ttc = 1/frame_capture_frequency
+                        # Theoretical limit of the system
+                        # using motion in depth (MiD) = 1 - T/ttc
+                        # ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = math.atan(bbox_ttc)/math.pi # 1 - 1/(bbox_ttc*frame_capture_frequency)
+                        ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = min(max(-10, bbox_ttc), 10)
+                        ttc_maps[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+
                 offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
                 offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset
                 offset_map[2, c_y, c_x] = 1  # 1-mask
 
+        if ttc is not None:
+            return pos_map, scale_map, offset_map, ttc_maps
         return pos_map, scale_map, offset_map
 
     def __repr__(self):

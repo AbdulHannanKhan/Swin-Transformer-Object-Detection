@@ -62,6 +62,50 @@ class RegLoss(nn.Module):
 
 
 @LOSSES.register_module()
+class TTCLoss(nn.Module):
+    def __init__(self,
+                 reduction='none',
+                 loss_weight=1e-2):
+        """RegLoss.
+
+        Args:
+            reduction (str, optional): . Defaults to 'mean'.
+                Options are "none", "mean" and "sum".
+            loss_weight (float, optional): Weight of the loss. Defaults to 1.0.
+        """
+        super(TTCLoss, self).__init__()
+        assert reduction in (None, 'none', 'mean', 'sum')
+        self.reduction = reduction
+        self.loss_weight = loss_weight
+        self.l1 = nn.L1Loss(reduction=self.reduction)
+
+    def forward(self,
+                h_pred,
+                h_label,
+                **kwargs):
+        """Forward function.
+
+        Args:
+            h_pred (torch.Tensor[n, 1, H//4, W//4]): The prediction.
+            h_label (torch.Tensor[n, 2, H//4, W//4]): The learning label of the prediction.
+        Returns:
+            torch.Tensor: The calculated loss
+        """
+        t = 1/12
+        pos_ind = h_label[:, -1, :, :] == 1
+        probs = h_pred[:, 0, :, :]
+        probs = probs[pos_ind]
+        labels = h_label[:, 0, :, :]
+        pos_probs = 1 - t/probs
+        pos_labs = 1 - t/labels[pos_ind]
+
+        l1_loss = self.l1(torch.log(pos_probs), torch.log(pos_labs))
+
+        reg_loss = torch.sum(l1_loss) / max(1.0, torch.sum(h_label[:, -1, :, :]))
+        return self.loss_weight * reg_loss
+
+
+@LOSSES.register_module()
 class OffsetLoss(nn.Module):
     def __init__(self,
                  reduction='none',
@@ -134,7 +178,7 @@ class CenterLoss(nn.Module):
         classes = pos_pred.shape[1]
         cls_loss = None
         pos_pred_sgm = pos_pred.sigmoid()
-        assigned_box = 0
+        # assigned_box = 0
 
         for i in range(classes):
             ignore_ind = 0
@@ -150,11 +194,11 @@ class CenterLoss(nn.Module):
             back_weight = negatives * ((1.0 - pos_label[:, mask_ind, :, :]) ** self.beta) * (pos_pred_sgm[:, i, :, :] ** self.alpha)
             focal_weight = fore_weight + back_weight
 
-            assigned_box += torch.sum(pos_label[:, center_ind, :, :])
+            assigned_box = torch.sum(pos_label[:, center_ind, :, :])
 
             if cls_loss is not None:
-                cls_loss = cls_loss + torch.sum(focal_weight * log_loss)
+                cls_loss = cls_loss + torch.sum(focal_weight * log_loss)/max(1.0, assigned_box)
             else:
-                cls_loss = torch.sum(focal_weight * log_loss)
-        cls_loss = cls_loss / assigned_box
+                cls_loss = torch.sum(focal_weight * log_loss)/max(1.0, assigned_box)
+        cls_loss = cls_loss/classes
         return self.loss_weight * cls_loss

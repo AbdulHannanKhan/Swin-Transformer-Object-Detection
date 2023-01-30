@@ -16,12 +16,14 @@ class CSP(SingleStageDetector):
                  train_cfg=None,
                  test_cfg=None,
                  pretrained=None,
-                 val_img_log_prob=-1):
+                 val_img_log_prob=-1,
+                 with_ttc=False):
         super(CSP, self).__init__(backbone, neck, bbox_head, train_cfg,
                                    test_cfg, pretrained)
         self.bbox_head.test_cfg = test_cfg.csp_head
         self.bbox_head.train_cfg = train_cfg.csp_head
         self.val_img_log_prob = val_img_log_prob
+        self.with_ttc = with_ttc
         if hasattr(self.neck, 'backlinks'):
             self.neck.backlinks.append(self)
 
@@ -33,7 +35,8 @@ class CSP(SingleStageDetector):
                       classification_maps,
                       scale_maps,
                       offset_maps,
-                      gt_bboxes_ignore=None):
+                      gt_bboxes_ignore=None,
+                      ttc_maps=None):
         """
         Args:
             img (Tensor): Input images of shape (N, C, H, W).
@@ -56,7 +59,7 @@ class CSP(SingleStageDetector):
         x = self.extract_feat(img)
         losses = self.bbox_head.forward_train(x, img_metas, gt_bboxes, gt_labels,
                                               gt_bboxes_ignore, classification_maps=classification_maps,
-                                              scale_maps=scale_maps, offset_maps=offset_maps)
+                                              scale_maps=scale_maps, offset_maps=offset_maps, ttc_maps=ttc_maps)
         return losses
 
     def simple_test(self, img, img_metas, rescale=False):
@@ -81,9 +84,15 @@ class CSP(SingleStageDetector):
         bbox_list = self.bbox_head.get_bboxes(
             *outs, img_metas, self.test_cfg, rescale=rescale)
 
-        bbox_results = [
-            bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes + 1)
-            for det_bboxes, det_labels in bbox_list
-        ]
+        if self.with_ttc:
+            bbox_results = [
+                bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes + 1)
+                for det_bboxes, det_labels, _ in bbox_list
+            ]
+        else:
+            bbox_results = [
+                bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes + 1)
+                for det_bboxes, det_labels in bbox_list
+            ]
 
         return bbox_results

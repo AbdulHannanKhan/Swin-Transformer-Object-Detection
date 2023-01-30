@@ -218,8 +218,10 @@ class LoadAnnotations(object):
                  with_mask=False,
                  with_seg=False,
                  poly2mask=True,
+                 with_ttc=False,
                  file_client_args=dict(backend='disk')):
         self.with_bbox = with_bbox
+        self.with_tti = with_ttc
         self.with_label = with_label
         self.with_mask = with_mask
         self.with_seg = with_seg
@@ -258,6 +260,11 @@ class LoadAnnotations(object):
         """
 
         results['gt_labels'] = results['ann_info']['labels'].copy()
+        return results
+
+    def _load_tti(self, results):
+
+        results['gt_tti'] = results['ann_info']['tti'].copy()
         return results
 
     def _poly2mask(self, mask_ann, img_h, img_w):
@@ -371,6 +378,8 @@ class LoadAnnotations(object):
             results = self._load_masks(results)
         if self.with_seg:
             results = self._load_semantic_seg(results)
+        if self.with_tti:
+            results = self._load_tti(results)
         return results
 
     def __repr__(self):
