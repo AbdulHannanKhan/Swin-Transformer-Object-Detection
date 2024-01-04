@@ -37,9 +37,15 @@ class CSPTTCHead(CSPHead):
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
                  num_classes=1,
                  predict_width=True,
+                 bn_for_ttc=False,
+                 drop_ttc=0.0,
                  wh_ratio=0.41,
-                 loss_ttc=dict(type='TTCLoss', loss_weight=0.2),
+                 loss_ttc=dict(type='MiDLoss', loss_weight=10),
                  **kwargs):
+
+        self.bn_for_ttc = bn_for_ttc
+        self.drop_ttc = drop_ttc
+
         super(CSPTTCHead, self).__init__(
             num_classes=num_classes,
             norm_cfg=norm_cfg,
@@ -71,7 +77,13 @@ class CSPTTCHead(CSPHead):
                     norm_cfg=self.norm_cfg,
                     bias=self.norm_cfg is None))
 
+        if self.bn_for_ttc:
+            self.ttc_convs.append(nn.BatchNorm2d(self.feat_channels))
+        if self.drop_ttc > 0:
+            self.ttc_convs.append(nn.Dropout2d(self.drop_ttc))
+
         self.csp_ttc = nn.Conv2d(self.feat_channels, 1, 3, padding=1)
+        self.ttc_relu = nn.LeakyReLU(0.1)
 
     def init_weights(self):
         """Initialize weights of the head."""
@@ -146,7 +158,7 @@ class CSPTTCHead(CSPHead):
         cls_score = self.csp_cls(cls_feat)
         bbox_pred = reg_scale(self.csp_reg(reg_feat).float())
         offset_pred = offset_scale(self.csp_offset(offset_feat).float())
-        ttc_pred = self.csp_ttc(ttc_feat).float()
+        ttc_pred = self.ttc_relu(self.csp_ttc(ttc_feat)).float() + 0.4
         return cls_score, bbox_pred, offset_pred, ttc_pred
 
     def get_targets(self, points, gt_bboxes_list, gt_labels_list):
@@ -173,6 +185,7 @@ class CSPTTCHead(CSPHead):
         offset_gts = self.concat_batch_gts(offset_maps)
 
         loss_cls = []
+        loss_tv = []
         for cls_score, cls_gt in zip(cls_scores, cls_maps):
             loss_cls.append(self.loss_cls(cls_score, cls_gt))
 
@@ -185,7 +198,12 @@ class CSPTTCHead(CSPHead):
         loss_bbox = loss_bbox[0]
         loss_ttc = []
         for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
-            loss_ttc.append(self.loss_ttc(ttc_pred, ttc_gt))
+            ttc = self.loss_ttc(ttc_pred, ttc_gt)
+            if isinstance(ttc, tuple):
+                tv = ttc[0]
+                loss_tv.append(tv)
+                ttc = ttc[1]
+            loss_ttc.append(ttc)
 
         loss_ttc = loss_ttc[0]
 
@@ -195,11 +213,22 @@ class CSPTTCHead(CSPHead):
 
         loss_offset = loss_offset[0]
 
+        if len(loss_tv) > 0:
+            loss_tv = loss_tv[0]
+            return dict(
+                loss_cls=loss_cls,
+                loss_bbox=loss_bbox,
+                loss_offset=loss_offset,
+                loss_L1ttc=loss_ttc.mean(),
+                loss_tv=loss_tv.mean(),
+            )
+
         return dict(
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
             loss_offset=loss_offset,
-            loss_ttc=loss_ttc,
+            loss_mMiD=loss_ttc,
+            MiD=loss_ttc.mean()/self.loss_ttc.loss_weight * 1e4,
         )
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds'))
@@ -320,18 +349,21 @@ class CSPTTCHead(CSPHead):
         if with_nms:
             padding = det_labels.new_zeros(det_labels.shape[0], 1)
             det_labels = torch.cat([det_labels, padding], dim=1)
-            det_ttcs = torch.cat([det_ttcs, padding], dim=1)
+            # det_ttcs = torch.cat([det_ttcs, padding], dim=1)
             cfg = self.test_cfg
-            det_bboxes, det_labels, keep = multiclass_nms(
+            _det_bboxes, _det_labels, keep = multiclass_nms(
                 det_bboxes,
                 det_labels,
                 cfg.score_thr,
                 cfg.nms,
                 cfg.max_per_img,
                 return_inds=True)
+            # if keep.max() >= det_ttcs.shape[0]-1:
+            #    keep[keep >= det_ttcs.shape[0]-1] = 0  # TODO: fix the hack
             # det_ttcs = det_ttcs[keep]
+            # det_ttcs = det_ttcs.new_zeros(_det_labels.shape[0], 1)
 
-        return det_bboxes, det_labels, det_ttcs
+        return _det_bboxes, _det_labels
 
     def _get_points_single(self, featmap_size, stride, dtype, device, flatten=None):
         h, w = featmap_size

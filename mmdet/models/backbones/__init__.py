@@ -14,8 +14,12 @@ from .swin_transformer import SwinTransformer
 from .cmlp import DetConvMLPSmall, DetConvMLPMedium, DetConvMLPLarge, DetConvMLPHR
 
 __all__ = [
-    'RegNet', 'ResNet', 'ResNetV1d', 'ResNeXt', 'SSDVGG', 'HRNet', 'Res2Net',
-    'HourglassNet', 'DetectoRS_ResNet', 'DetectoRS_ResNeXt', 'Darknet',
-    'ResNeSt', 'TridentResNet', 'SwinTransformer', 'DetConvMLPSmall', 'DetConvMLPMedium', 'DetConvMLPLarge',
+    'RegNet', 'ResNet', 'ResNetV1d', 'ResNeXt', 'SSDVGG', 
+    'HRNet', 
+    'Res2Net',
+    'HourglassNet', 'DetectoRS_ResNet', 'DetectoRS_ResNeXt',
+    'Darknet',
+    'ResNeSt', 'TridentResNet', 'SwinTransformer', 
+    'DetConvMLPSmall', 'DetConvMLPMedium', 'DetConvMLPLarge',
     'DetConvMLPHR'
 ]

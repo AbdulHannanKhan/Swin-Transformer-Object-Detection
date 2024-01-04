@@ -292,6 +292,8 @@ class CocoDataset(CustomDataset):
             dict[str: str]: Possible keys are "bbox", "segm", "proposal", and \
                 values are corresponding filenames.
         """
+        outfile_prefix = "/netscratch/hkhan/kitti/best_ttc"
+        print('writing results to json file to {}.bbox.json'.format(outfile_prefix))
         result_files = dict()
         if isinstance(results[0], list):
             json_results = self._det2json(results)
@@ -357,6 +359,7 @@ class CocoDataset(CustomDataset):
             'The length of results is not equal to the dataset len: {} != {}'.
             format(len(results), len(self)))
 
+        print(jsonfile_prefix)
         if jsonfile_prefix is None:
             tmp_dir = tempfile.TemporaryDirectory()
             jsonfile_prefix = osp.join(tmp_dir.name, 'results')
@@ -373,6 +376,7 @@ class CocoDataset(CustomDataset):
                  classwise=False,
                  proposal_nums=(100, 300, 1000),
                  iou_thrs=None,
+                 cats=None,
                  metric_items=None, **kwargs):
         """Evaluation in COCO protocol.
 
@@ -475,9 +479,12 @@ class CocoDataset(CustomDataset):
                     level=logging.ERROR)
                 break
 
+            if cats is None:
+                cats = self.cat_ids
+
             iou_type = 'bbox' if metric == 'proposal' else metric
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
-            cocoEval.params.catIds = self.cat_ids
+            cocoEval.params.catIds = cats
             cocoEval.params.imgIds = self.img_ids
             cocoEval.params.maxDets = list(proposal_nums)
             cocoEval.params.iouThrs = iou_thrs

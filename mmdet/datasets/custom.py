@@ -227,7 +227,8 @@ class CustomDataset(Dataset):
         """
 
         img_info = self.data_infos[idx]
-        results = dict(img_info=img_info)
+        ann_info = self.get_ann_info(idx)
+        results = dict(img_info=img_info, ann_info=ann_info)
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
@@ -268,8 +269,8 @@ class CustomDataset(Dataset):
                  metric='mAP',
                  logger=None,
                  proposal_nums=(100, 300, 1000),
-                 iou_thr=0.5,
-                 scale_ranges=None):
+                 iou_thr=np.linspace(.5, 0.95, int(np.round((0.95 - .5) / .05)) + 1, endpoint=True).tolist(),
+                 scale_ranges=[[16, 1e5]], **kwargs):
         """Evaluate the dataset.
 
         Args:
@@ -306,8 +307,8 @@ class CustomDataset(Dataset):
                     iou_thr=iou_thr,
                     dataset=self.CLASSES,
                     logger=logger)
-                mean_aps.append(mean_ap)
-                eval_results[f'AP{int(iou_thr * 100):02d}'] = round(mean_ap, 3)
+                mean_aps.append(mean_ap[0])
+                eval_results[f'AP{int(iou_thr * 100):02d}'] = np.int64(mean_ap[0]*1000)/1000
             eval_results['mAP'] = sum(mean_aps) / len(mean_aps)
         elif metric == 'recall':
             gt_bboxes = [ann['bboxes'] for ann in annotations]

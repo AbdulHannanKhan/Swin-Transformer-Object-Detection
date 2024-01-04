@@ -37,6 +37,7 @@ class MixerBlock(nn.Module):
         x = x + self.channel_mix(out)
         return x
 
+
 class MLP(nn.Module):
     def __init__(self,
                  embedding_dim_in,

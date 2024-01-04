@@ -97,7 +97,7 @@ def log_image_with_boxes(
     bbox_tag: str = None,
     labels: np.ndarray = None,
     scores = None,
-    class_names: Tuple[str] = None,
+    class_names = ['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle' ,'pedestrain', 'traffic_cone', 'barrier'],
     filename: str = None,
     img_norm_cfg: dict = None,
     backend: str = "auto",
@@ -151,7 +151,7 @@ def log_image_with_boxes(
         image = color_transform(image, **img_norm_cfg)
     if labels is None:
         labels = np.zeros_like(scores, dtype=np.long)
-    class_names = ['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle' ,'pedestrain', 'traffic_cone', 'barrier']
+
     im = {}
     im["data_or_path"] = image
     im["boxes"] = convert_box(

@@ -33,6 +33,8 @@ from .csp_trans_head import CSPTransHead
 from .csp_full_trans import CSPFullTransHead
 from .dfdn import DFDN
 from .csp_ttc_head import CSPTTCHead
+from .csp_mid_head import CSPMiDHead
+from .dfdn_ttc import DFDNTTC
 # from .fcos_tti_head import FCOSTTIHead
 
 __all__ = [
@@ -43,6 +45,6 @@ __all__ = [
     'PISARetinaHead', 'PISASSDHead', 'GFLHead', 'CornerHead', 'YOLACTHead',
     'YOLACTSegmHead', 'YOLACTProtonet', 'YOLOV3Head', 'PAAHead',
     'SABLRetinaHead', 'CentripetalHead', 'VFNetHead', 'TransformerHead',
-    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead',
-    'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN', 'CSPTTCHead' # 'FCOSTTIHead',
+    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead', 'CSPMiDHead',
+    'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN', 'CSPTTCHead', 'DFDNTTC' # 'FCOSTTIHead',
 ]

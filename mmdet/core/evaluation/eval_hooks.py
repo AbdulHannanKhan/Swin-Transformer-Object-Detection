@@ -1,7 +1,7 @@
 import os.path as osp
 import warnings
 from math import inf
-
+import numpy as np
 import mmcv
 import torch.distributed as dist
 from mmcv.runner import Hook
@@ -227,6 +227,7 @@ class DistEvalHook(EvalHook):
                  save_best=None,
                  rule=None,
                  broadcast_bn_buffer=True,
+                 with_ttc=False,
                  **eval_kwargs):
         super().__init__(
             dataloader,
@@ -236,6 +237,7 @@ class DistEvalHook(EvalHook):
             save_best=save_best,
             rule=rule,
             **eval_kwargs)
+        self.with_ttc = with_ttc
         self.broadcast_bn_buffer = broadcast_bn_buffer
         self.tmpdir = tmpdir
         self.gpu_collect = gpu_collect
@@ -265,14 +267,37 @@ class DistEvalHook(EvalHook):
         tmpdir = self.tmpdir
         if tmpdir is None:
             tmpdir = osp.join(runner.work_dir, '.eval_hook')
-        results = multi_gpu_test(
-            runner.model,
-            self.dataloader,
-            tmpdir=tmpdir,
-            gpu_collect=self.gpu_collect)
+        if self.with_ttc:
+            results, mid, classes = multi_gpu_test(
+                runner.model,
+                self.dataloader,
+                tmpdir=tmpdir,
+                gpu_collect=self.gpu_collect,
+                ttc_loss=True)
+        else:
+            results = multi_gpu_test(
+                runner.model,
+                self.dataloader,
+                tmpdir=tmpdir,
+                gpu_collect=self.gpu_collect)
         if runner.rank == 0:
             print('\n')
             key_score = self.evaluate(runner, results)
+            if self.with_ttc:
+                mid = np.array(mid).reshape((-1, 2))
+                cls, mid = mid[:, 0], mid[:, 1]
+                for i in range(len(classes)):
+                    mask = cls == i
+                    mid_c = mid[mask]
+                    if len(mid_c) > 0:
+                        print(f'{classes[i]}: {int(np.mean(mid_c))} calculated over {len(mid_c)} points.')
+                    else:
+                        print(f'{classes[i]}: 0 calculated over 0 points.')
+                        mid_c = [10000]
+                    runner.log_buffer.output["MiD_"+classes[i]] = int(np.mean(mid_c))
+                print(f'TTC mid: {int(np.mean(mid))} calculated over {len(mid)} points.')
+                runner.log_buffer.output["MiD"] = int(np.mean(mid))
+
             if self.save_best:
                 self.save_best_checkpoint(runner, key_score)
 

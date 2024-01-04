@@ -4,24 +4,17 @@ from inspect import signature
 from mmcv.cnn import ConvModule, bias_init_with_prob, normal_init
 from ..builder import HEADS, build_loss
 from .anchor_free_head import AnchorFreeHead
+from .dfdn import DFDN
 from mmdet.core import multi_apply, multiclass_nms, bbox2result
 from mmcv.runner import force_fp32
+from .csp_head import CSPHead, Scale
+from ..utils import MixerBlock, window_reverse, window_partition
 
 INF = 1e8
 
 
-class Scale(nn.Module):
-
-    def __init__(self, scale=1.0):
-        super(Scale, self).__init__()
-        self.scale = nn.Parameter(torch.tensor(scale, dtype=torch.float))
-
-    def forward(self, x):
-        return x * self.scale
-
-
 @HEADS.register_module()
-class CSPHead(AnchorFreeHead):
+class DFDNTTC(DFDN):
     def __init__(self,
                  regress_ranges=((-1, 64), (64, 128), (128, 256), (256, 512),
                                  (512, INF)),
@@ -35,79 +28,66 @@ class CSPHead(AnchorFreeHead):
                      loss_weight=0.05),
                  loss_bbox=dict(type='RegLoss', loss_weight=0.01),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
-                 num_classes=1,
-                 predict_width=True,
+                 num_classes=2,
+                 patch_dim=4,
                  wh_ratio=0.41,
+                 loss_ttc=dict(type='MiDLoss', loss_weight=10),
+                 windowed_input=True,
+                 predict_width=True,
                  **kwargs):
-        super(CSPHead, self).__init__(
+
+        super(DFDNTTC, self).__init__(
+            patch_dim=patch_dim,
+            predict_width=predict_width,
+            windowed_input=windowed_input,
             num_classes=num_classes,
+            wh_ratio=wh_ratio,
             norm_cfg=norm_cfg,
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
+            loss_offset=loss_offset,
             **kwargs)
 
-        self.wh_ratio = wh_ratio
-        self.predict_width = predict_width
         self.regress_ranges = regress_ranges
-        self.loss_offset = build_loss(loss_offset)
+        self.loss_ttc = build_loss(loss_ttc)
 
     def _init_layers(self):
-        """Initialize layers of the head."""
-        self.cls_convs = nn.ModuleList()
-        self.reg_convs = nn.ModuleList()
-        self.offset_convs = nn.ModuleList()
-        for i in range(self.stacked_convs):
-            chn = self.in_channels if i == 0 else self.feat_channels
-            self.cls_convs.append(
-                ConvModule(
-                    chn,
-                    self.feat_channels,
-                    3,
-                    stride=1,
-                    padding=1,
-                    conv_cfg=self.conv_cfg,
-                    norm_cfg=self.norm_cfg,
-                    bias=self.norm_cfg is None))
-            self.reg_convs.append(
-                ConvModule(
-                    chn,
-                    self.feat_channels,
-                    3,
-                    stride=1,
-                    padding=1,
-                    conv_cfg=self.conv_cfg,
-                    norm_cfg=self.norm_cfg,
-                    bias=self.norm_cfg is None))
-            self.offset_convs.append(
-                ConvModule(
-                    chn,
-                    self.feat_channels,
-                    3,
-                    stride=1,
-                    padding=1,
-                    conv_cfg=self.conv_cfg,
-                    norm_cfg=self.norm_cfg,
-                    bias=self.norm_cfg is None))
+        self.mlp_with_feat_reduced = nn.Sequential(
+            MixerBlock(self.patch_dim ** 2, self.in_channels),
+            nn.Linear(self.in_channels, self.feat_channels)
+        )
 
-            self.csp_cls = nn.Conv2d(self.feat_channels, self.cls_out_channels, 3, padding=1)
-            self.csp_reg = nn.Conv2d(self.feat_channels, 2, 3, padding=1)
-            self.csp_offset = nn.Conv2d(self.feat_channels, 2, 3, padding=1)
+        self.pos_mlp = nn.Sequential(
+            MixerBlock(self.patch_dim ** 2, self.feat_channels),
+            nn.Linear(self.feat_channels, self.num_classes),
+        )
 
-            self.reg_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
-            self.offset_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
+        if self.predict_width:
+            self.reg_mlp = nn.Sequential(
+                MixerBlock(self.patch_dim ** 2, self.feat_channels),
+                nn.Linear(self.feat_channels, 2)  # Predict width and height
+            )
+        else:
+            self.reg_mlp = nn.Sequential(
+                MixerBlock(self.patch_dim ** 2, self.feat_channels),
+                nn.Linear(self.feat_channels, 1)  # Predict only height
+            )
+
+        self.off_mlp = nn.Sequential(
+            MixerBlock(self.patch_dim ** 2, self.feat_channels),
+            nn.Linear(self.feat_channels, 2)
+        )
+
+        self.ttc_mlp = nn.Sequential(
+            MixerBlock(self.patch_dim ** 2, self.feat_channels),
+            nn.Linear(self.feat_channels, 1),
+            nn.LeakyReLU(0.1)
+        )
 
     def init_weights(self):
-        """Initialize weights of the head."""
-        for m in self.cls_convs:
-            normal_init(m.conv, std=0.01)
-        for m in self.reg_convs:
-            normal_init(m.conv, std=0.01)
-        for m in self.offset_convs:
-            normal_init(m.conv, std=0.01)
-        bias_cls = bias_init_with_prob(0.01)
-        normal_init(self.csp_cls, std=0.01, bias=bias_cls)
-        normal_init(self.csp_reg, std=0.01)
-        normal_init(self.csp_offset, std=0.01)
+        self.reg_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
+        self.offset_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
+        self.ttc_scales = nn.ModuleList([Scale(1.0) for _ in self.strides])
 
     def forward_train(self,
                       x,
@@ -119,6 +99,7 @@ class CSPHead(AnchorFreeHead):
                       scale_maps=None,
                       offset_maps=None,
                       proposal_cfg=None,
+                      ttc_maps=None,
                       **kwargs):
         """
         Args:
@@ -145,7 +126,7 @@ class CSPHead(AnchorFreeHead):
         else:
             loss_inputs = outs + (gt_bboxes, gt_labels, img_metas)
         losses = self.loss(*loss_inputs, classification_maps=classification_maps, scale_maps=scale_maps,
-                           offset_maps=offset_maps, gt_bboxes_ignore=gt_bboxes_ignore)
+                           offset_maps=offset_maps, gt_bboxes_ignore=gt_bboxes_ignore, ttc_maps=ttc_maps)
         if proposal_cfg is None:
             return losses
         else:
@@ -153,48 +134,56 @@ class CSPHead(AnchorFreeHead):
             return losses, proposal_list
 
     def forward(self, feats, *args):
-        return multi_apply(self.forward_single, feats, self.reg_scales, self.offset_scales)
+        return multi_apply(self.forward_single, feats, self.reg_scales, self.offset_scales, self.ttc_scales)
 
-    def forward_single(self, x, reg_scale, offset_scale):
-        cls_feat = x
-        reg_feat = x
-        offset_feat = x
+    def forward_single(self, x, reg_scale, offset_scale, ttc_scale):
+        if not self.windowed_input:
+            B, _, self.height, self.width = x.shape
+            windows = window_partition(x, self.patch_dim, channel_last=False)
+        else:
+            windows = x
+        feat = self.mlp_with_feat_reduced(windows)
 
-        for cls_conv in self.cls_convs:
-            cls_feat = cls_conv(cls_feat)
+        x_cls = self.pos_mlp(feat)
+        x_reg = self.reg_mlp(feat)
+        x_off = self.off_mlp(feat)
+        x_ttc = self.ttc_mlp(feat) + 0.4
 
-        for reg_conv in self.reg_convs:
-            reg_feat = reg_conv(reg_feat)
+        h = int(self.height)
+        w = int(self.width)
 
-        for offset_conv in self.offset_convs:
-            offset_feat = offset_conv(offset_feat)
+        x_cls = window_reverse(x_cls, self.patch_dim, w, h)
+        x_reg = window_reverse(x_reg, self.patch_dim, w, h)
+        x_off = window_reverse(x_off, self.patch_dim, w, h)
+        x_ttc = window_reverse(x_ttc, self.patch_dim, w, h)
 
-        cls_score = self.csp_cls(cls_feat)
-        bbox_pred = reg_scale(self.csp_reg(reg_feat).float())
-        offset_pred = offset_scale(self.csp_offset(offset_feat).float())
-        return cls_score, bbox_pred, offset_pred
+        return x_cls, reg_scale(x_reg).float(), offset_scale(x_off).float(), ttc_scale(x_ttc).float()
 
     def get_targets(self, points, gt_bboxes_list, gt_labels_list):
         pass
 
-    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds'))
+    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds'))
     def loss(self,
              cls_scores,
              bbox_preds,
              offset_preds,
+             ttc_preds,
              gt_bboxes,
              gt_labels,
              img_metas,
              classification_maps=None,
              scale_maps=None,
              offset_maps=None,
-             gt_bboxes_ignore=None):
+             gt_bboxes_ignore=None,
+             ttc_maps=None):
         assert len(cls_scores) == len(bbox_preds) == len(offset_preds)
         cls_maps = self.concat_batch_gts(classification_maps)
         bbox_gts = self.concat_batch_gts(scale_maps)
+        ttc_maps = self.concat_batch_gts(ttc_maps)
         offset_gts = self.concat_batch_gts(offset_maps)
 
         loss_cls = []
+        loss_tv = []
         for cls_score, cls_gt in zip(cls_scores, cls_maps):
             loss_cls.append(self.loss_cls(cls_score, cls_gt))
 
@@ -205,6 +194,16 @@ class CSPHead(AnchorFreeHead):
             loss_bbox.append(self.loss_bbox(bbox_pred, bbox_gt))
 
         loss_bbox = loss_bbox[0]
+        loss_ttc = []
+        for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
+            ttc = self.loss_ttc(ttc_pred, ttc_gt)
+            if isinstance(ttc, tuple):
+                tv = ttc[0]
+                loss_tv.append(tv)
+                ttc = ttc[1]
+            loss_ttc.append(ttc)
+
+        loss_ttc = loss_ttc[0]
 
         loss_offset = []
         for offset_pred, offset_map in zip(offset_preds, offset_gts):
@@ -212,16 +211,30 @@ class CSPHead(AnchorFreeHead):
 
         loss_offset = loss_offset[0]
 
+        if len(loss_tv) > 0:
+            loss_tv = loss_tv[0]
+            return dict(
+                loss_cls=loss_cls,
+                loss_bbox=loss_bbox,
+                loss_offset=loss_offset,
+                loss_L1ttc=loss_ttc.mean(),
+                loss_tv=loss_tv.mean(),
+            )
+
         return dict(
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
-            loss_offset=loss_offset)
+            loss_offset=loss_offset,
+            loss_mMiD=loss_ttc,
+            MiD=loss_ttc.mean()/self.loss_ttc.loss_weight * 1e4,
+        )
 
-    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds'))
+    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds'))
     def get_bboxes(self,
                    cls_scores,
                    bbox_preds,
                    offset_preds,
+                   ttc_preds,
                    img_metas,
                    cfg,
                    rescale=None,
@@ -240,13 +253,16 @@ class CSPHead(AnchorFreeHead):
             bbox_pred_list = [
                 bbox_preds[i][img_id].detach() for i in range(num_levels)
             ]
+            ttc_pred_list = [
+                ttc_preds[i][img_id].detach() for i in range(num_levels)
+            ]
             offset_pred_list = [
                 offset_preds[i][img_id].detach() for i in range(num_levels)
             ]
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
             det_bboxes = self._get_bboxes_single(cls_score_list, bbox_pred_list,
-                                                offset_pred_list,
+                                                offset_pred_list, ttc_pred_list,
                                                 mlvl_points, img_shape,
                                                 scale_factor, cfg, rescale, with_nms)
             result_list.append(det_bboxes)
@@ -288,25 +304,26 @@ class CSPHead(AnchorFreeHead):
                           cls_scores,
                           bbox_preds,
                           offset_preds,
+                          ttc_preds,
                           mlvl_points,
                           img_shape,
                           scale_factor,
                           cfg,
                           rescale=False,
                           with_nms=False):
-        assert len(cls_scores) == len(bbox_preds) == len(mlvl_points)
+        assert len(cls_scores) == len(bbox_preds) == len(mlvl_points) == len(ttc_preds)
         mlvl_bboxes = []
         mlvl_scores = []
-        for cls_score, bbox_pred, offset_pred, points, stride in zip(
-                cls_scores, bbox_preds, offset_preds, mlvl_points, self.strides):
+        mlvl_ttcs = []
+        for cls_score, bbox_pred, offset_pred, ttc_pred, points, stride in zip(
+                cls_scores, bbox_preds, offset_preds, ttc_preds, mlvl_points, self.strides):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
             # self.show_debug_info(cls_score, bbox_pred, offset_pred, stride)
             scores = cls_score.permute(1, 2, 0).reshape(
-                -1, self.cls_out_channels)
-
-            scores = scores.sigmoid()
+                -1, self.cls_out_channels).sigmoid()
 
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 2 if self.predict_width else 1).exp()
+            ttc_pred = ttc_pred.permute(1, 2, 0).reshape(-1, 1)
             offset_pred = offset_pred.permute(1, 2, 0).reshape(-1, 2)
 
             nms_pre = self.test_cfg.get('nms_pre', -1)
@@ -315,27 +332,36 @@ class CSPHead(AnchorFreeHead):
                 _, topk_inds = max_scores.topk(nms_pre)
                 points = points[topk_inds, :]
                 bbox_pred = bbox_pred[topk_inds, :]
+                ttc_pred = ttc_pred[topk_inds, :]
                 scores = scores[topk_inds, :]
                 offset_pred = offset_pred[topk_inds, :]
             bboxes = self.cspdet2bbox(points, bbox_pred, offset_pred, stride=stride, max_shape=img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
+            mlvl_ttcs.append(ttc_pred)
         det_bboxes = torch.cat(mlvl_bboxes)
         if rescale:
             det_bboxes /= det_bboxes.new_tensor(scale_factor)
         det_labels = torch.cat(mlvl_scores)
+        det_ttcs = torch.cat(mlvl_ttcs)
         if with_nms:
             padding = det_labels.new_zeros(det_labels.shape[0], 1)
             det_labels = torch.cat([det_labels, padding], dim=1)
+            # det_ttcs = torch.cat([det_ttcs, padding], dim=1)
             cfg = self.test_cfg
-            det_bboxes, det_labels = multiclass_nms(
+            _det_bboxes, _det_labels, keep = multiclass_nms(
                 det_bboxes,
                 det_labels,
                 cfg.score_thr,
                 cfg.nms,
-                cfg.max_per_img)
+                cfg.max_per_img,
+                return_inds=True)
+            # if keep.max() >= det_ttcs.shape[0]-1:
+            #    keep[keep >= det_ttcs.shape[0]-1] = 0  # TODO: fix the hack
+            # det_ttcs = det_ttcs[keep]
+            # det_ttcs = det_ttcs.new_zeros(_det_labels.shape[0], 1)
 
-        return det_bboxes, det_labels
+        return _det_bboxes, _det_labels
 
     def _get_points_single(self, featmap_size, stride, dtype, device, flatten=None):
         h, w = featmap_size
@@ -367,6 +393,7 @@ class CSPHead(AnchorFreeHead):
 
         aug_bboxes = []
         aug_scores = []
+        aug_ttcs = []
         aug_factors = []
         for x, img_meta in zip(feats, img_metas):
 
@@ -375,22 +402,27 @@ class CSPHead(AnchorFreeHead):
             bbox_outputs = self.get_bboxes(*bbox_inputs)[0]
             aug_bboxes.append(bbox_outputs[0])
             aug_scores.append(bbox_outputs[1])
+            aug_ttcs.append(bbox_outputs[2])
 
-            if len(bbox_outputs) >= 3:
-                aug_factors.append(bbox_outputs[2])
+            if len(bbox_outputs) >= 4:
+                aug_factors.append(bbox_outputs[3])
 
         merged_bboxes, merged_scores = self.merge_aug_bboxes(
             aug_bboxes, aug_scores, img_metas)
+        merged_ttcs = torch.cat(aug_ttcs, dim=0)
         merged_factors = torch.cat(aug_factors, dim=0) if aug_factors else None
         padding = merged_scores.new_zeros(merged_scores.shape[0], 1)
         merged_scores = torch.cat([merged_scores, padding], dim=1)
-        det_bboxes, det_labels = multiclass_nms(
+        merged_ttcs = torch.cat([merged_ttcs, padding], dim=1)
+        det_bboxes, det_labels, keep = multiclass_nms(
             merged_bboxes,
             merged_scores,
             self.test_cfg.score_thr,
             self.test_cfg.nms,
             self.test_cfg.max_per_img,
-            score_factors=merged_factors)
+            score_factors=merged_factors,
+            return_inds=True)
+        det_ttcs = merged_ttcs[keep]
 
         if rescale:
             _det_bboxes = det_bboxes
@@ -399,4 +431,4 @@ class CSPHead(AnchorFreeHead):
             _det_bboxes[:, :4] *= det_bboxes.new_tensor(
                 img_metas[0][0]['scale_factor'])
         bbox_results = bbox2result(_det_bboxes, det_labels, self.num_classes + 1)
-        return bbox_results
+        return bbox_results, det_ttcs

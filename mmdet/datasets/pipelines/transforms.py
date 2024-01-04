@@ -28,7 +28,7 @@ except ImportError:
 @PIPELINES.register_module()
 class CSPMaps(object):
 
-    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False, image_shape=None, num_classes=1):
+    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False, bbox_ttc=False, image_shape=None, num_classes=1):
         self.radius = radius
         self.stride = stride
         self.regress_range = regress_range
@@ -36,6 +36,7 @@ class CSPMaps(object):
         self.num_classes = num_classes
         self.with_width=with_width
         self.with_ttc = with_ttc
+        self.bb_ttc = bbox_ttc
 
     def __call__(self, results):
         """Call function to add csp maps to train pipeline.
@@ -46,6 +47,9 @@ class CSPMaps(object):
         Returns:
             dict: results, 'pos_map', 'scale_map', 'offset_map', keys are added into result dict.
         """
+
+        if self.image_shape is None:
+            self.image_shape = results['img'].shape
 
         if self.with_ttc:
             gts, igs, ttc, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results["gt_tti"], results['gt_labels']
@@ -88,6 +92,10 @@ class CSPMaps(object):
         half_height = (half_height >= regress_range[0]) & (half_height <= regress_range[1])
         inds = half_height.nonzero()
         gts = gts[inds]
+
+        # deep copy gts
+        gts_org = copy.deepcopy(gts)
+
         if ttc is not None:
             ttc = ttc[inds]
         if len(gts) > 0:
@@ -103,9 +111,19 @@ class CSPMaps(object):
                 dy = gaussian(y2-y1)
                 gau_map = np.multiply(dy, np.transpose(dx))
 
-                pos_map[1+2*labels[ind], y1:y2, x1:x2] = np.maximum(pos_map[1+2*labels[ind], y1:y2, x1:x2], gau_map)  # gauss map
-                pos_map[0, y1:y2, x1:x2] = 1  # 1-mask map
-                pos_map[2+2*labels[ind], c_y, c_x] = 1  # center map
+                # check if c_x and c_y are in the image
+                if c_x < 0 or c_x >= image_shape[1] / stride or c_y < 0 or c_y >= image_shape[0] / stride:
+                    # print("Rejected ann, out of bound! c_x: {}, c_y: {}".format(c_x, c_y))
+                    continue
+
+                if labels is not None and pos_map[1+2*labels[ind], y1:y2, x1:x2].shape == gau_map.shape:
+                    pos_map[1+2*labels[ind], y1:y2, x1:x2] = np.maximum(pos_map[1+2*labels[ind], y1:y2, x1:x2], gau_map)  # gauss map
+                    pos_map[0, y1:y2, x1:x2] = 1  # 1-mask map
+                    pos_map[2+2*labels[ind], c_y, c_x] = 1  # center map
+
+                if np.log(gts[ind, 3] - gts[ind, 1]) < 1 or np.log(gts[ind, 2] - gts[ind, 0]) < 1:
+                    # print(f"Too small object detected! {labels[ind]} {c_x} {c_y} {gts_org[ind, 2] - gts_org[ind, 0]} {gts_org[ind, 3] - gts_org[ind, 1]}")
+                    pass
 
                 scale_map[0, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 3] - gts[ind, 1])  #value of height
                 if self.with_width:
@@ -114,14 +132,32 @@ class CSPMaps(object):
 
                 if ttc is not None:
                     if not(np.isnan(bbox_ttc) or bbox_ttc == 0):
-                        frame_capture_frequency = 12
-                        if 0 < bbox_ttc < 1/frame_capture_frequency:
-                            bbox_ttc = 1/frame_capture_frequency
                         # Theoretical limit of the system
                         # using motion in depth (MiD) = 1 - T/ttc
                         # ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = math.atan(bbox_ttc)/math.pi # 1 - 1/(bbox_ttc*frame_capture_frequency)
-                        ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = min(max(-10, bbox_ttc), 10)
-                        ttc_maps[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+
+                        # make sure bbox_ttc is in range [0.5, 1.3]
+                        bbox_ttc = np.clip(bbox_ttc, 0.5, 1.3)
+
+                        if self.bb_ttc:
+                            h75 = (y2-y1) * 0.5
+                            w75 = (x2-x1) * 0.5
+
+                            x1_r = int(np.ceil(c_x - w75/2))
+                            x2_r = int(np.ceil(c_x + w75/2))
+
+                            y1_r = int(np.ceil(c_y - h75/2))
+                            y2_r = int(np.ceil(c_y + h75/2))
+
+                            dx_r = gaussian(x2_r-x1_r)
+                            dy_r = gaussian(y2_r-y1_r)
+                            gau_map_r = np.multiply(dy_r, np.transpose(dx_r))
+
+                            ttc_maps[0, y1_r:y2_r, x1_r:x2_r] = bbox_ttc
+                            ttc_maps[1, y1_r:y2_r, x1_r:x2_r] = np.maximum(ttc_maps[1, y1_r:y2_r, x1_r:x2_r], gau_map_r)
+                        else:
+                            ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = bbox_ttc
+                            ttc_maps[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
 
                 offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
                 offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset
@@ -170,18 +206,27 @@ class RemoveSmallBoxes(object):
         if self.min_box_size <= 0 or gt_bboxes.shape[0] == 0:
             return results
 
+
         gt_bboxes_edges = gt_bboxes[:, [2, 3]] - gt_bboxes[:, [0, 1]]
-        keep_bboxes_inds = (gt_bboxes_edges.min(-1) >= self.min_gt_box_size).nonzero()[0]
 
-        ign_box_edges = gt_bboxes_ignore[:, [2, 3]] - gt_bboxes_ignore[:, [0, 1]]
-        keep_ignore_inds = (ign_box_edges.min(-1) >= self.min_box_size).nonzero()[0]
-        
-        if keep_ignore_inds.shape[0] > 0:
-            results['gt_bboxes_ignore'] = results['gt_bboxes_ignore'][keep_ignore_inds]
+        valid_inds = (gt_bboxes_edges[:, 0] >= self.min_gt_box_size) & (
+                gt_bboxes_edges[:, 1] >= self.min_gt_box_size)
+        gt_bboxes = gt_bboxes[valid_inds, :]
+        if "gt_labels" in results:
+            results["gt_labels"] = results["gt_labels"][valid_inds]
 
-        if keep_bboxes_inds.shape[0] > 0:
-            results['gt_bboxes'] = gt_bboxes[keep_bboxes_inds]
-            results['gt_labels'] = results['gt_labels'][keep_bboxes_inds]
+        if "gt_tti" in results:
+            results["gt_tti"] = results["gt_tti"][valid_inds]
+
+        gt_bboxes_ignore_edges = gt_bboxes_ignore[:, [2, 3]] - gt_bboxes_ignore[:, [0, 1]]
+        valid_inds = (gt_bboxes_ignore_edges[:, 0] >= self.min_box_size) & (
+                gt_bboxes_ignore_edges[:, 1] >= self.min_box_size)
+        gt_bboxes_ignore = gt_bboxes_ignore[valid_inds, :]
+        if "gt_labels_ignore" in results:
+            results["gt_labels_ignore"] = results["gt_labels_ignore"][valid_inds]
+
+        results["gt_bboxes"] = gt_bboxes
+        results["gt_bboxes_ignore"] = gt_bboxes_ignore
 
         return results
 
@@ -469,10 +514,12 @@ class Resize(object):
                     results.pop('scale_factor')
                 self._random_scale(results)
 
+        # print("Before: ", results['img'].shape)
         self._resize_img(results)
         self._resize_bboxes(results)
         self._resize_masks(results)
         self._resize_seg(results)
+        # print("After: ", results['img'].shape, " Scale Factor: ", results['scale_factor'])
         return results
 
     def __repr__(self):
@@ -940,6 +987,8 @@ class RandomCrop(object):
                 bboxes[:, 3] > bboxes[:, 1])
             # If the crop does not contain any gt-bbox area and
             # allow_negative_crop is False, skip this image.
+            if key == 'gt_bboxes' and 'gt_tti' in results:
+                results['gt_tti'] = results['gt_tti'][valid_inds]
             if (key == 'gt_bboxes' and not valid_inds.any()
                     and not allow_negative_crop):
                 return None

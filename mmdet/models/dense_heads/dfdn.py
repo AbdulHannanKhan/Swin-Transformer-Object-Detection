@@ -40,7 +40,7 @@ class DFDN(CSPHead):
         self.predict_width = predict_width
         self.windowed_input = windowed_input
 
-        super(CSPHead, self).__init__(
+        super(DFDN, self).__init__(
             num_classes=num_classes,
             norm_cfg=norm_cfg,
             loss_cls=loss_cls,
