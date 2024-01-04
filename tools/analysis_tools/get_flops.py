@@ -2,7 +2,8 @@ import argparse
 
 import torch
 from mmcv import Config, DictAction
-
+import os
+import sys
 from mmdet.models import build_detector
 
 try:
