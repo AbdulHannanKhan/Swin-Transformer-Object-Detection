@@ -1,10 +1,7 @@
 _base_ = [
-    './templates/models/lsfm_tiny.py',
-    './templates/datasets/tju_traffic.py',
-    './templates/optimizers/optimizer_1x.py',
+    "./base_schedule.py", "./base_f2dnet.py", "./base_cp.py"
 ]
 
-evaluation = dict(type="DistEvalHook", interval=1, classwise=True)
 log_config = dict(
     interval=50,
     hooks=[
@@ -12,9 +9,9 @@ log_config = dict(
         dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
-                project="DHD_Traffic_Obj",
-                name="lsfm_tiny_2x4_imagenet_norm",
-                entity="hannankhan",
+                entity="mlpthesis",
+                project="MLPOD",
+                name="h2x4_3focus_neck_1_head_32c_mixup_ecp_cp",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -26,4 +23,5 @@ log_config = dict(
 )
 
 
-resume_from="./work_dirs/lsfm_tiny_2x4_imagenet_norm/epoch_17.pth"
+load_from='/netscratch/hkhan/work_dirs/mlpod/ecp/NH_HR_mixup/epoch_68.pth'
+

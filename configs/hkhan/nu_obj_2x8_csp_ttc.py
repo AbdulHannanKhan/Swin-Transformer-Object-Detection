@@ -60,7 +60,7 @@ model = dict(
         loss_offset=dict(
             type='OffsetLoss', loss_weight=0.1,
         ),
-        loss_ttc=dict(type='TTCLoss', loss_weight=1e1),
+        loss_ttc=dict(type='MiDLoss', loss_weight=0.2),
     ),
     train_cfg=dict(
         rcnn=dict(
@@ -102,14 +102,14 @@ img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 
 # augmentation strategy originates from DETR / Sparse RCNN
-img_scale = (1600, 928)
+img_scale = (928, 1600)
 train_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_ttc=True, with_mask=False),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='RandomBrightness'),
     # dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
-    dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.2)),
+    dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.6)),
     dict(type='RandomCrop', crop_size=img_scale),
     dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
     dict(type='RandomPave', size=img_scale),
@@ -122,18 +122,21 @@ train_pipeline = [
 
 test_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
+    dict(type='LoadAnnotations', with_bbox=True, with_ttc=True, with_mask=False),
     dict(
         type='MultiScaleFlipAug',
         img_scale=img_scale,
         flip=False,
         transforms=[
-            dict(type='Resize', keep_ratio=True),
-            dict(type='RandomFlip'),
-            dict(type='Normalize', **img_norm_cfg),
             dict(type='Pad', size_divisor=32),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img']),
-        ]),
+            dict(type='Resize', keep_ratio=True),
+            dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='CSPMaps', radius=8, with_width=width, stride=4, regress_range=(-1, 1e8), with_ttc=True, num_classes=10),
+            dict(type='ImageToTensor', keys=['img', 'ttc_maps']),
+            dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'classification_maps', 'scale_maps', 'offset_maps', 'ttc_maps']),
+       ],
+    ),
 ]
 data_root = '/netscratch/hkhan/tju/dhd_traffic'
 data = dict(
@@ -144,7 +147,7 @@ data = dict(
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
         ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_train_mono3d.coco.json",
-        img_prefix="/netscratch/hkhan/nuscenes/raw/",
+        img_prefix="/netscratch/hkhan/nu/data/samples/",
         pipeline=train_pipeline,
     ),
     val=dict(
@@ -152,7 +155,7 @@ data = dict(
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
         ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_val_mono3d.coco.json",
-        img_prefix="/netscratch/hkhan/nuscenes/raw/",
+        img_prefix="/netscratch/hkhan/nu/data/samples/",
         pipeline=test_pipeline,
     ),
     test=dict(
@@ -160,7 +163,7 @@ data = dict(
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
         ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_val_mono3d.coco.json",
-        img_prefix="/netscratch/hkhan/nuscenes/raw/",
+        img_prefix="/netscratch/hkhan/nu/data/samples/",
         pipeline=test_pipeline,
     ),
 )
@@ -173,10 +176,10 @@ optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 # optimizer_config = dict(_delete_=True, grad_clip=dict(max_norm=32, norm_type=2))
 fp16 = None # dict(loss_scale=16.)
 
-evaluation=dict(classwise=True, metric='bbox')
+evaluation=dict(classwise=True, metric='bbox', with_ttc=True)
 
 log_config = dict(
-    interval=25,
+    interval=50,
     hooks=[
         dict(type="TextLoggerHook", by_epoch=False),
         dict(
@@ -195,4 +198,4 @@ log_config = dict(
 )
 
 
-# resume_from="./work_dirs/nu_obj_2x8_csp_ttc/epoch_8.pth"
+resume_from="./work_dirs/nu_obj_2x8_csp_ttc/epoch_1.pth"

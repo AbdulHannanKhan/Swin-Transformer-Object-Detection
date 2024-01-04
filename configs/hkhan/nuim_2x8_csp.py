@@ -100,7 +100,7 @@ img_norm_cfg = dict(
 # augmentation strategy originates from DETR / Sparse RCNN
 img_scale = (1600, 928)
 train_pipeline = [
-    dict(type='LoadImageFromFile', to_float32=True),
+    dict(type='LoadImageFromZip', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='RandomBrightness'),
@@ -117,7 +117,7 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='LoadImageFromFile', to_float32=True),
+    dict(type='LoadImageFromZip', to_float32=True),
     dict(
         type='MultiScaleFlipAug',
         img_scale=img_scale,
@@ -131,7 +131,7 @@ test_pipeline = [
             dict(type='Collect', keys=['img']),
         ]),
 ]
-data_root = '/ds-av/public_datasets/nuimages/raw/'
+data_root = '/netscratch/hkhan/nuimages-v1.0-all-samples.zip/nuimages-v1.0-all-samples'
 data = dict(
     samples_per_gpu=2,
     workers_per_gpu=2,
@@ -155,7 +155,7 @@ data = dict(
         type="CocoDataset",
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nuimages_v1.0-mini.json",
+        ann_file="/netscratch/hkhan/nu/nuimages_v1.0-val.json",
         img_prefix=data_root,
         pipeline=test_pipeline,
     ),

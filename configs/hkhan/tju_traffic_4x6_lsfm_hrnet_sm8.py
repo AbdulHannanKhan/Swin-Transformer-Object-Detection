@@ -6,15 +6,47 @@ width=True
 
 model = dict(
     type='CSP',
-    pretrained="/home/hkhan/Convolutional-MLPs/output/train/20230127-124135-convmlp_hr_classification-224/model_best.pth.tar",
-    backbone=dict(type="DetConvMLPHR"),
+    val_img_log_prob=0.01,
+    pretrained='open-mmlab://msra/hrnetv2_w32',
+    backbone=dict(
+        type='HRNet',
+        extra=dict(
+            stage1=dict(
+                num_modules=1,
+                num_branches=1,
+                block='BOTTLENECK',
+                num_blocks=(4, ),
+                num_channels=(64, )),
+            stage2=dict(
+                num_modules=1,
+                num_branches=2,
+                block='BASIC',
+                num_blocks=(4, 4),
+                num_channels=(32, 64)),
+            stage3=dict(
+                num_modules=4,
+                num_branches=3,
+                block='BASIC',
+                num_blocks=(4, 4, 4),
+                num_channels=(32, 64, 128)),
+            stage4=dict(
+                num_modules=3,
+                num_branches=4,
+                block='BASIC',
+                fuse_till=3,
+                num_blocks=(4, 4, 4, 4),
+                num_channels=(32, 64, 128, 256))
+        ),
+        #frozen_stages=-1,
+        norm_eval=False,
+    ),
     neck=dict(
         type='BP3',
-        in_channels=[64, 128, 256, 512],
+        in_channels=[32, 64, 128, 256],
         out_channels=32,
         mixer_count=1,
         linear_reduction=False,
-        feat_channels=[4, 16, 128, 1024]
+        feat_channels=[4, 16, 128]
     ),
     bbox_head=dict(
         type='DFDN',
@@ -24,10 +56,9 @@ model = dict(
         patch_dim=8,
         feat_channels=32,
         strides=[4],
-        multiclass=True,
         predict_width=width,
         loss_cls=dict(
-            type='MultiClassCenterLoss',
+            type='CenterLoss',
             loss_weight=0.01),
         loss_bbox=dict(type='RegLoss', loss_weight=0.05, reg_param_count=(2 if width else 1)),
         loss_offset=dict(
@@ -75,6 +106,8 @@ img_norm_cfg = dict(
 
 # augmentation strategy originates from DETR / Sparse RCNN
 img_scale = (1632, 1216)
+# img_scale = (1344, 800)
+# img_scale = (320, 256)
 train_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
@@ -83,7 +116,7 @@ train_pipeline = [
     dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
     dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.5)),
     dict(type='RandomCrop', crop_size=img_scale),
-    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
+    dict(type='RemoveSmallBoxes', min_box_size=4, min_gt_box_size=4),
     dict(type='RandomPave', size=img_scale),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='CSPMaps', radius=8, with_width=width, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, num_classes=5),
@@ -109,7 +142,7 @@ test_pipeline = [
 ]
 data_root = '/netscratch/hkhan/tju/dhd_traffic'
 data = dict(
-    samples_per_gpu=16,
+    samples_per_gpu=32,
     workers_per_gpu=2,
     train=dict(
         type="CocoDataset",
@@ -136,11 +169,10 @@ data = dict(
 
 optimizer = dict(_delete_=True, type='Adam', lr=0.0002)
 lr_config = dict(step=[80], policy='step', warmup='constant', warmup_iters=250, warmup_ratio=1.0/3,)
-runner = dict(type='EpochBasedRunner', max_epochs=120)
-# optimizer_config=dict(mean_teacher=dict(alpha=0.999))
+runner = dict(type='MeanTeacherRunner', max_epochs=120)
+optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 # do not use mmdet version fp16
-optimizer_config = dict(_delete_=True, grad_clip=dict(max_norm=32, norm_type=2))
-fp16 = dict(loss_scale=16.)
+fp16 = None
 # optimizer_config = dict(
 #    type="DistOptimizerHook",
 #    update_interval=1,
@@ -149,7 +181,6 @@ fp16 = dict(loss_scale=16.)
 #     bucket_size_mb=-1,
 #     use_fp16=True,
 # )
-# evaluation = dict(type="DistEvalHook", interval=1)
 evaluation = dict(type="DistEvalHook", interval=1, classwise=True)
 log_config = dict(
     interval=50,
@@ -159,7 +190,8 @@ log_config = dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
                 project="DHD_Traffic_Obj",
-                name="auto_fp16_multiclass",
+                name="lsfm_hrnet_sm8",
+                entity="hannankhan",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -171,4 +203,4 @@ log_config = dict(
 )
 
 
-# resume_from="./work_dirs/nu_obj_2x4/epoch_71.pth"
+# resume_from="./work_dirs/tju_traffic_4x16_auto/epoch_6.pth"

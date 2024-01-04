@@ -24,10 +24,9 @@ model = dict(
         patch_dim=8,
         feat_channels=32,
         strides=[4],
-        multiclass=True,
         predict_width=width,
         loss_cls=dict(
-            type='MultiClassCenterLoss',
+            type='CenterLoss',
             loss_weight=0.01),
         loss_bbox=dict(type='RegLoss', loss_weight=0.05, reg_param_count=(2 if width else 1)),
         loss_offset=dict(
@@ -109,7 +108,7 @@ test_pipeline = [
 ]
 data_root = '/netscratch/hkhan/tju/dhd_traffic'
 data = dict(
-    samples_per_gpu=16,
+    samples_per_gpu=8,
     workers_per_gpu=2,
     train=dict(
         type="CocoDataset",
@@ -140,7 +139,8 @@ runner = dict(type='EpochBasedRunner', max_epochs=120)
 # optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 # do not use mmdet version fp16
 optimizer_config = dict(_delete_=True, grad_clip=dict(max_norm=32, norm_type=2))
-fp16 = dict(loss_scale=16.)
+fp16=None
+# fp16 = dict(loss_scale=16.)
 # optimizer_config = dict(
 #    type="DistOptimizerHook",
 #    update_interval=1,
@@ -159,7 +159,7 @@ log_config = dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
                 project="DHD_Traffic_Obj",
-                name="auto_fp16_multiclass",
+                name="auto_multiclass",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",

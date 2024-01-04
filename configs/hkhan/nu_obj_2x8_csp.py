@@ -96,8 +96,10 @@ model = dict(
     ),
 )
 
+# img_norm_cfg = dict(
+#     mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
 img_norm_cfg = dict(
-    mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 
 # augmentation strategy originates from DETR / Sparse RCNN
 img_scale = (1600, 928)
@@ -136,12 +138,12 @@ test_pipeline = [
 data_root = '/netscratch/hkhan/tju/dhd_traffic'
 data = dict(
     samples_per_gpu=4,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         type="CocoDataset",
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nu_infos_train_mono3d.coco.json",
+        ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_train_mono3d.coco.json",
         img_prefix="/netscratch/hkhan/nuscenes/raw/",
         pipeline=train_pipeline,
     ),
@@ -149,7 +151,7 @@ data = dict(
         type="CocoDataset",
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nu_infos_val_mono3d.coco.json",
+        ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_val_mono3d.coco.json",
         img_prefix="/netscratch/hkhan/nuscenes/raw/",
         pipeline=test_pipeline,
     ),
@@ -157,7 +159,7 @@ data = dict(
         type="CocoDataset",
         classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
                  'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nu_infos_val_mono3d.coco.json",
+        ann_file="/netscratch/hkhan/nu/full/nuscenes_infos_val_mono3d.coco.json",
         img_prefix="/netscratch/hkhan/nuscenes/raw/",
         pipeline=test_pipeline,
     ),
@@ -181,7 +183,7 @@ log_config = dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
                 project="NU_Obj",
-                name="csp_sm4",
+                name="csp_new_ann",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -193,4 +195,4 @@ log_config = dict(
 )
 
 
-resume_from="./work_dirs/nu_obj_2x8_csp/epoch_8.pth"
+# resume_from="./work_dirs/nu_obj_2x8_csp/epoch_4.pth"

@@ -1,7 +1,7 @@
 _base_ = [
     '../_base_/schedules/schedule_1x.py', '../_base_/default_runtime.py'
 ]
-
+width=True
 model = dict(
     type='CSP',
     val_img_log_prob=0.01,
@@ -30,6 +30,7 @@ model = dict(
             stage4=dict(
                 num_modules=3,
                 num_branches=4,
+                fuse_till=3,
                 block='BASIC',
                 num_blocks=(4, 4, 4, 4),
                 num_channels=(32, 64, 128, 256))
@@ -38,22 +39,26 @@ model = dict(
         norm_eval=False,
     ),
     neck=dict(
-        type='HRFPN',
+        type='BP3',
         in_channels=[32, 64, 128, 256],
-        out_channels=768,
-        num_outs=1,
+        out_channels=32,
+        mixer_count=1,
+        linear_reduction=False,
+        feat_channels=[4, 16, 128]
     ),
     bbox_head=dict(
-        type='CSPHead',
-        num_classes=10,
-        in_channels=768,
+        type='DFDN',
+        num_classes=80,
+        in_channels=32,
         stacked_convs=1,
-        feat_channels=256,
+        patch_dim=8,
+        feat_channels=32,
         strides=[4],
+        predict_width=width,
         loss_cls=dict(
             type='CenterLoss',
             loss_weight=0.01),
-        loss_bbox=dict(type='RegLoss', loss_weight=0.05),
+        loss_bbox=dict(type='RegLoss', loss_weight=0.05, reg_param_count=(2 if width else 1)),
         loss_offset=dict(
             type='OffsetLoss', loss_weight=0.1,
         ),
@@ -94,30 +99,33 @@ model = dict(
     ),
 )
 
+# img_norm_cfg = dict(
+#     mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
+
 img_norm_cfg = dict(
-    mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 
 # augmentation strategy originates from DETR / Sparse RCNN
-img_scale = (1600, 928)
+img_scale = (1344, 800)
 train_pipeline = [
-    dict(type='LoadImageFromFile', to_float32=True),
+    dict(type='LoadImageFromZip', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='RandomBrightness'),
-    dict(type='RemoveSmallBoxes', min_box_size=1, min_gt_box_size=8),
+    # dict(type='RemoveSmallBoxes', min_box_size=1, min_gt_box_size=8),
     dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.5)),
     dict(type='RandomCrop', crop_size=img_scale),
-    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
+    dict(type='RemoveSmallBoxes', min_box_size=6, min_gt_box_size=6),
     dict(type='RandomPave', size=img_scale),
     dict(type='Normalize', **img_norm_cfg),
-    dict(type='CSPMaps', radius=8, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, num_classes=10),
+    dict(type='CSPMaps', radius=8, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, num_classes=80),
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'classification_maps',
                                'scale_maps', 'offset_maps']),
 ]
 
 test_pipeline = [
-    dict(type='LoadImageFromFile', to_float32=True),
+    dict(type='LoadImageFromZip', to_float32=True),
     dict(
         type='MultiScaleFlipAug',
         img_scale=img_scale,
@@ -131,32 +139,26 @@ test_pipeline = [
             dict(type='Collect', keys=['img']),
         ]),
 ]
-data_root = '/ds-av/public_datasets/nuimages/raw/'
+data_root = '/netscratch/hkhan/coco/'
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
+    samples_per_gpu=6,
+    workers_per_gpu=2,
     train=dict(
         type="CocoDataset",
-        classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
-                 'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nuimages_v1.0-train.json",
-        img_prefix=data_root,
+        ann_file=data_root + 'annotations/instances_train2017.json',
+        img_prefix=data_root+"train2017.zip/train2017",
         pipeline=train_pipeline,
     ),
     val=dict(
         type="CocoDataset",
-        classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
-                 'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nuimages_v1.0-val.json",
-        img_prefix=data_root,
+        ann_file=data_root + 'annotations/instances_val2017.json',
+        img_prefix=data_root+"val2017.zip/val2017",
         pipeline=test_pipeline,
     ),
     test=dict(
         type="CocoDataset",
-        classes=['car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'bicycle', 'motorcycle', 'pedestrian',
-                 'traffic_cone', 'barrier'],
-        ann_file="/netscratch/hkhan/nu/nuimages_v1.0-val.json",
-        img_prefix=data_root,
+        ann_file=data_root + 'annotations/instances_val2017.json',
+        img_prefix=data_root+"val2017.zip/val2017",
         pipeline=test_pipeline,
     ),
 )
@@ -178,8 +180,9 @@ log_config = dict(
         dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
-                project="nu_img_2D",
-                name="nu_image_csp_train",
+                project="COCO2017Det",
+                entity="hannankhan",
+                name="lsfm_4x6_res_81",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -189,3 +192,4 @@ log_config = dict(
         ),
     ],
 )
+resume_from="./work_dirs/coco_4x6_lsfm_hrnet/epoch_81.pth"

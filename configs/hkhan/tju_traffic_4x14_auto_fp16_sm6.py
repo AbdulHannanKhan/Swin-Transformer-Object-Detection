@@ -15,7 +15,7 @@ model = dict(
         mixer_count=1,
         linear_reduction=False,
         feat_channels=[4, 16, 128, 1024]
-    ),
+    ), 
     bbox_head=dict(
         type='DFDN',
         num_classes=5,
@@ -24,10 +24,9 @@ model = dict(
         patch_dim=8,
         feat_channels=32,
         strides=[4],
-        multiclass=True,
         predict_width=width,
         loss_cls=dict(
-            type='MultiClassCenterLoss',
+            type='CenterLoss',
             loss_weight=0.01),
         loss_bbox=dict(type='RegLoss', loss_weight=0.05, reg_param_count=(2 if width else 1)),
         loss_offset=dict(
@@ -74,16 +73,16 @@ img_norm_cfg = dict(
     mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
 
 # augmentation strategy originates from DETR / Sparse RCNN
-img_scale = (1632, 1216)
+img_scale = (800, 608) # (1632, 1216)
 train_pipeline = [
     dict(type='LoadImageFromFile', to_float32=True),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=False),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='RandomBrightness'),
-    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
+    dict(type='RemoveSmallBoxes', min_box_size=6, min_gt_box_size=6),
     dict(type='Resize', img_scale=img_scale, ratio_range=(0.4, 1.5)),
     dict(type='RandomCrop', crop_size=img_scale),
-    dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
+    dict(type='RemoveSmallBoxes', min_box_size=6, min_gt_box_size=6),
     dict(type='RandomPave', size=img_scale),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='CSPMaps', radius=8, with_width=width, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, num_classes=5),
@@ -109,7 +108,7 @@ test_pipeline = [
 ]
 data_root = '/netscratch/hkhan/tju/dhd_traffic'
 data = dict(
-    samples_per_gpu=16,
+    samples_per_gpu=12,
     workers_per_gpu=2,
     train=dict(
         type="CocoDataset",
@@ -159,7 +158,8 @@ log_config = dict(
             type="WandbLoggerHook",
             init_kwargs=dict(
                 project="DHD_Traffic_Obj",
-                name="auto_fp16_multiclass",
+                entity="hannankhan",
+                name="auto_4x12_fp16",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
