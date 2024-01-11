@@ -178,7 +178,7 @@ class CSPQTTCHead(CSPTTCHead):
         mid = 0
         for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
             ttc = self.loss_ttc(ttc_pred, ttc_gt)
-            mid = self.mid_loss(ttc_pred, ttc_gt)
+            mid = self.mid_loss(ttc_pred.sigmoid(), ttc_gt)
             if isinstance(ttc, tuple):
                 tv = ttc[0]
                 loss_tv.append(tv)
