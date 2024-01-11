@@ -34,6 +34,14 @@ class CSPQTTCHead(CSPTTCHead):
                  loss_ttc=dict(type='QTTCLoss', loss_weight=0.1),
                  **kwargs):
 
+        self.ttc_bins = ttc_bins
+        self.bin_bias = bin_bias
+        if bin_weights is None:
+            self.bin_weights = torch.ones(ttc_bins, dtype=torch.float32) * 0.1
+        else:
+            assert len(bin_weights) == ttc_bins
+            self.bin_weights = bin_weights
+
         super(CSPQTTCHead, self).__init__(
             num_classes=num_classes,
             norm_cfg=norm_cfg,
@@ -45,14 +53,6 @@ class CSPQTTCHead(CSPTTCHead):
             regress_ranges=regress_ranges,
             loss_offset=loss_offset,
             **kwargs)
-
-        self.ttc_bins = ttc_bins
-        self.bin_bias = bin_bias
-        if bin_weights is None:
-            self.bin_weights = torch.ones(ttc_bins, dtype=torch.float32) * 0.1
-        else:
-            assert len(bin_weights) == ttc_bins
-            self.bin_weights = bin_weights
 
     def _init_layers(self):
         """Initialize layers of the head."""
