@@ -40,7 +40,10 @@ class CSPQTTCHead(CSPTTCHead):
             self.bin_weights = torch.ones(ttc_bins, dtype=torch.float32) * 0.1
         else:
             assert len(bin_weights) == ttc_bins
-            self.bin_weights = bin_weights
+            self.bin_weights = torch.from_numpy(bin_weights)
+
+        # move bin_weights to cuda
+        self.bin_weights = self.bin_weights.cuda()
 
         super(CSPQTTCHead, self).__init__(
             num_classes=num_classes,
