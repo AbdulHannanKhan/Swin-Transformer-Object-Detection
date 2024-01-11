@@ -426,3 +426,43 @@ class CenterLoss(nn.Module):
                 cls_loss = torch.sum(focal_weight * log_loss)/max(1.0, assigned_box)
         cls_loss = cls_loss/classes
         return self.loss_weight * cls_loss
+
+@LOSSES.register_module()
+class QTTCLoss(nn.Module):
+    def __init__(self,
+                 loss_weight=0.1):
+        """CenterLoss.
+
+        Args:
+            loss_weight (float, optional): Weight of the loss. Defaults to 0.1.
+        """
+        super(QTTCLoss, self).__init__()
+        self.loss_weight = loss_weight
+        self.bce = nn.BCELoss(reduction='none')
+
+    def forward(self,
+                ttc_pred,
+                ttc_label,
+                **kwargs):
+        """Forward function.
+
+        Args:
+            ttc_pred (torch.Tensor[n, bins, H//4, W//4]): The prediction.
+            ttc_label (torch.Tensor[n, 1 + bins, H//4, W//4]): The learning label of the prediction.
+        Returns:
+            torch.Tensor: The calculated loss
+        """
+        bins = ttc_pred.shape[1]
+        mask = ttc_label[:, 0, :, :] == 1
+        ttc_label = ttc_label[:, 1:, :, :]
+        mask = mask.reshape(-1)
+        ttc_loss = 0
+
+        for i in range(bins):
+
+            log_loss = self.bce(ttc_pred[:, i, :, :], ttc_label[:, i, :, :])
+            log_loss = log_loss.reshape(-1)[mask].mean()
+
+            ttc_loss = ttc_loss + log_loss
+        ttc_loss = ttc_loss / bins
+        return self.loss_weight * ttc_loss

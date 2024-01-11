@@ -15,7 +15,7 @@ from .pisa_loss import carl_loss, isr_p
 from .smooth_l1_loss import L1Loss, SmoothL1Loss, l1_loss, smooth_l1_loss
 from .utils import reduce_loss, weight_reduce_loss, weighted_loss
 from .varifocal_loss import VarifocalLoss
-from .csp_losses import OffsetLoss, RegLoss, CenterLoss, TTCLoss, MiDLoss, MultiClassCenterLoss
+from .csp_losses import OffsetLoss, RegLoss, CenterLoss, TTCLoss, MiDLoss, MultiClassCenterLoss, QTTCLoss
 
 __all__ = [
     'accuracy', 'Accuracy', 'cross_entropy', 'binary_cross_entropy',
@@ -27,5 +27,5 @@ __all__ = [
     'l1_loss', 'isr_p', 'carl_loss', 'AssociativeEmbeddingLoss',
     'GaussianFocalLoss', 'QualityFocalLoss', 'DistributionFocalLoss',
     'VarifocalLoss', 'KnowledgeDistillationKLDivLoss',
-    'OffsetLoss', 'RegLoss', 'CenterLoss', 'TTCLoss', 'MiDLoss', 'MultiClassCenterLoss'
+    'OffsetLoss', 'RegLoss', 'CenterLoss', 'TTCLoss', 'MiDLoss', 'MultiClassCenterLoss', 'QTTCLoss'
 ]

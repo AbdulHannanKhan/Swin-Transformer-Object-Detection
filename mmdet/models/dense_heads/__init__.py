@@ -35,6 +35,7 @@ from .dfdn import DFDN
 from .csp_ttc_head import CSPTTCHead
 from .csp_mid_head import CSPMiDHead
 from .dfdn_ttc import DFDNTTC
+from .csp_qttc_head import CSPQTTCHead
 # from .fcos_tti_head import FCOSTTIHead
 
 __all__ = [
