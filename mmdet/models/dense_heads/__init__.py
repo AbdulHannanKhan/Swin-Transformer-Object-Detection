@@ -46,6 +46,6 @@ __all__ = [
     'PISARetinaHead', 'PISASSDHead', 'GFLHead', 'CornerHead', 'YOLACTHead',
     'YOLACTSegmHead', 'YOLACTProtonet', 'YOLOV3Head', 'PAAHead',
     'SABLRetinaHead', 'CentripetalHead', 'VFNetHead', 'TransformerHead',
-    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead', 'CSPMiDHead',
+    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead', 'CSPMiDHead', 'CSPQTTCHead',
     'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN', 'CSPTTCHead', 'DFDNTTC' # 'FCOSTTIHead',
 ]
