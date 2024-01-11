@@ -460,7 +460,7 @@ class QTTCLoss(nn.Module):
 
         for i in range(bins):
 
-            log_loss = self.bce(ttc_pred[:, i, :, :], ttc_label[:, i, :, :])
+            log_loss = self.bce(ttc_pred[:, i, :, :].sigmoid(), ttc_label[:, i, :, :])
             log_loss = log_loss.reshape(-1)[mask].mean()
 
             ttc_loss = ttc_loss + log_loss
