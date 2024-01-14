@@ -128,8 +128,10 @@ class CSP(SingleStageDetector):
         if gt_tti is not None or predicted_MiD:
             tti_pred = outs[3]
             det_ttc = []
-            tti_pred = tti_pred[0][0][0]
-            tti_pred = tti_pred.clamp(min=1e-10)
+            tti_pred = tti_pred[0]
+            if tti_pred.shape[1] > 1:
+                tti_pred = self.bbox_head.bins2ttc(tti_pred.sigmoid())
+            tti_pred = tti_pred[0][0].clamp(min=1e-10)
 
         mid_array = []
 
@@ -137,7 +139,10 @@ class CSP(SingleStageDetector):
 
             # mid = MiDLoss(loss_weight=1e4)
             # mid_array = mid(tti_pred[0], gt_tti[0].permute(0, 2, 3, 1))
-            gt_tti = gt_tti[0].permute(0, 2, 3, 1)[0][0]
+            gt_tti = gt_tti[0].permute(0, 2, 3, 1)
+            if gt_tti.shape[1] > 2:
+                gt_tti = self.bbox_head.bins2ttc(gt_tti[:, 1:, :, :])
+            gt_tti = gt_tti[0][0]
 
 
             det_ttc = []
