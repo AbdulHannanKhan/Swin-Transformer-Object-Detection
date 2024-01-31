@@ -293,12 +293,12 @@ class DistEvalHook(EvalHook):
                     mask = cls == i
                     mid_c = mid[mask]
                     if len(mid_c) > 0:
-                        print(f'{classes[i]}: {int(np.mean(mid_c))} calculated over {len(mid_c)} points.')
+                        print(f'{classes[i]}: {np.mean(mid_c)} calculated over {len(mid_c)} points.')
                     else:
                         print(f'{classes[i]}: 0 calculated over 0 points.')
                         mid_c = [10000]
                     runner.log_buffer.output["MiD_"+classes[i]] = int(np.mean(mid_c))
-                print(f'TTC mid: {int(np.mean(mid))} calculated over {len(mid)} points.')
+                print(f'TTC {self.error_func}: {np.mean(mid)} calculated over {len(mid)} points.')
                 runner.log_buffer.output["MiD"] = int(np.mean(mid))
 
             if self.save_best:
