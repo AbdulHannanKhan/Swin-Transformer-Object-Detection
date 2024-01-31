@@ -203,9 +203,9 @@ class CSP(SingleStageDetector):
                     if error is not None:
                         mid_array.append(error.item())
                 else:
-                    pred_tti_value = pred_tti_value.item() > 0.5
-                    gt_tti_value = gt_tti_value.item() > 0.5
-                    eval = pred_tti_value == gt_tti_value
+                    pred_tti_value = pred_tti_value.item()
+                    gt_tti_value = gt_tti_value.item()
+                    eval = np.abs(pred_tti_value - gt_tti_value)*100
                 if eval is not None:
                     if gt_labels is None:
                         mid_array.append(eval)
