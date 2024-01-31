@@ -228,6 +228,7 @@ class DistEvalHook(EvalHook):
                  rule=None,
                  broadcast_bn_buffer=True,
                  with_ttc=False,
+                 ttc_error_func="mid",
                  **eval_kwargs):
         super().__init__(
             dataloader,
@@ -238,6 +239,7 @@ class DistEvalHook(EvalHook):
             rule=rule,
             **eval_kwargs)
         self.with_ttc = with_ttc
+        self.error_func = ttc_error_func
         self.broadcast_bn_buffer = broadcast_bn_buffer
         self.tmpdir = tmpdir
         self.gpu_collect = gpu_collect
@@ -273,6 +275,7 @@ class DistEvalHook(EvalHook):
                 self.dataloader,
                 tmpdir=tmpdir,
                 gpu_collect=self.gpu_collect,
+                error_func=self.error_func,
                 ttc_loss=True)
         else:
             results = multi_gpu_test(

@@ -66,6 +66,14 @@ class CSP(SingleStageDetector):
                                               scale_maps=scale_maps, offset_maps=offset_maps, ttc_maps=ttc_maps)
         return losses
 
+    def exp_test(self, img, cx, cy):
+
+        feat = self.extract_feat(img)[0]
+        qttc = self.bbox_head.exp_ttc_bin(feat, cx, cy)
+
+        return qttc
+
+
     def simple_test(self, img, img_metas, rescale=False, ttc_maps=None, error_func="mid", gt_labels=None, gt_bboxes=None, check_range=(0.5, 1.3), ttc_out=False, **kwargs):
         """Test function without test time augmentation.
 
@@ -131,7 +139,8 @@ class CSP(SingleStageDetector):
             tti_pred = tti_pred[0]
             if tti_pred.shape[1] > 1:
                 tti_pred = self.bbox_head.bins2ttc(tti_pred.sigmoid())
-            tti_pred = tti_pred[0][0].clamp(min=1e-10)
+            if error_func != "acc":
+                tti_pred = tti_pred[0][0].clamp(min=1e-10)
 
         mid_array = []
 
@@ -182,7 +191,7 @@ class CSP(SingleStageDetector):
                         error = mid_error(pred_tti_value, gt_tti_value)
                         if error is not None:
                             eval = error.item()
-                else:
+                elif ef != "acc":
                     for _b in range(9):
                         error = ttc_error(pred_tti_value, gt_tti_value, _check_range=(a_seq(_b), a_seq(_b + 1)))
                         if error is not None:
@@ -190,7 +199,8 @@ class CSP(SingleStageDetector):
                     error = ttc_error(pred_tti_value, gt_tti_value, check_range)
                     if error is not None:
                         mid_array.append(error.item())
-
+                else:
+                    eval = pred_tti_value.item() == gt_tti_value.item()
                 if eval is not None:
                     if gt_labels is None:
                         mid_array.append(eval)

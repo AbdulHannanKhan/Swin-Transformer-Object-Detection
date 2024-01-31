@@ -163,10 +163,16 @@ class CSPMaps(object):
                             ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = bbox_ttc
                             ttc_maps[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
                         else:
-                            ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
-                            for i in range(ttc_bins):
-                                if bbox_ttc > (0.1 * i + 0.5):
-                                    ttc_maps[1+i, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+                            if 0.998 < bbox_ttc < 1.002:
+                                pass  # ignoring values +15 < ttc < -15, @30fps
+                            else:
+                                ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
+                                if ttc_bins > 1:
+                                    for i in range(ttc_bins):
+                                        if bbox_ttc > (0.1 * i + 0.5):
+                                            ttc_maps[1+i, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+                                elif bbox_ttc > 1.0:
+                                        ttc_maps[1 + i, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
 
                 offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
                 offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset

@@ -115,6 +115,17 @@ class CSPQTTCHead(CSPTTCHead):
     def forward(self, feats, *args):
         return multi_apply(self.forward_single, feats, self.reg_scales, self.offset_scales)
 
+    def exp_ttc_bin(self, x, cx, cy):
+
+        ttc_feat = x
+        for ttc_conv in self.cls_convs:
+            ttc_feat = ttc_conv(ttc_feat)
+        qttc_bins = self.csp_cls(ttc_feat).float().sigmoid()
+
+        qttc = qttc_bins[:, :, cy, cx]
+
+        return qttc
+
     def forward_single(self, x, reg_scale, offset_scale):
         cls_feat = x
         reg_feat = x
@@ -178,7 +189,8 @@ class CSPQTTCHead(CSPTTCHead):
         mid = 0
         for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
             ttc = self.loss_ttc(ttc_pred, ttc_gt)
-            mid = self.mid_loss(ttc_pred.sigmoid(), ttc_gt)
+            if self.ttc_bins > 1:
+                mid = self.mid_loss(ttc_pred.sigmoid(), ttc_gt)
             if isinstance(ttc, tuple):
                 tv = ttc[0]
                 loss_tv.append(tv)
