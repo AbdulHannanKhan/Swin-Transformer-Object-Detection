@@ -166,23 +166,23 @@ data = dict(
     train=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_train_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/train.json",
         img_prefix=data_root,
         pipeline=train_pipeline,
     ),
     val=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_val_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/val.json",
         img_prefix=data_root,
         pipeline=test_pipeline,
     ),
     test=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_val_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/val.json",
         img_prefix=data_root,
-        pipeline=demo_pipeline,
+        pipeline=test_pipeline,
     ),
 )
 
