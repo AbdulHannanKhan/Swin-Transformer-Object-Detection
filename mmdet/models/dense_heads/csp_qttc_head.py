@@ -277,8 +277,9 @@ class CSPQTTCHead(CSPTTCHead):
                 -1, self.cls_out_channels).sigmoid()
 
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 2 if self.predict_width else 1).exp()
-            ttc_pred = ttc_pred[None, :, :, :]
-            ttc_pred = self.bins2ttc(ttc_pred)[0]
+            if self.ttc_bins > 1:
+                ttc_pred = ttc_pred[None, :, :, :]
+                ttc_pred = self.bins2ttc(ttc_pred)[0]
             ttc_pred = ttc_pred.permute(1, 2, 0).reshape(-1, 1)
             offset_pred = offset_pred.permute(1, 2, 0).reshape(-1, 2)
 
