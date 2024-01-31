@@ -139,8 +139,9 @@ class CSP(SingleStageDetector):
             tti_pred = tti_pred[0]
             if tti_pred.shape[1] > 1:
                 tti_pred = self.bbox_head.bins2ttc(tti_pred.sigmoid())
+            tti_pred = tti_pred[0][0]
             if error_func != "acc":
-                tti_pred = tti_pred[0][0].clamp(min=1e-10)
+                tti_pred = tti_pred.clamp(min=1e-10)
 
         mid_array = []
 
