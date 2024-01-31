@@ -205,7 +205,7 @@ class CSP(SingleStageDetector):
                 else:
                     pred_tti_value = pred_tti_value.item() > 0.5
                     gt_tti_value = gt_tti_value.item() > 0.5
-                    eval = pred_tti_value.item() == gt_tti_value.item()
+                    eval = pred_tti_value == gt_tti_value
                 if eval is not None:
                     if gt_labels is None:
                         mid_array.append(eval)
