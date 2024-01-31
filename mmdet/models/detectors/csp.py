@@ -142,6 +142,8 @@ class CSP(SingleStageDetector):
             tti_pred = tti_pred[0][0]
             if error_func != "acc":
                 tti_pred = tti_pred.clamp(min=1e-10)
+            else:
+                tti_pred = tti_pred.sigmoid()
 
         mid_array = []
 
@@ -201,6 +203,8 @@ class CSP(SingleStageDetector):
                     if error is not None:
                         mid_array.append(error.item())
                 else:
+                    pred_tti_value = pred_tti_value.item() > 0.5
+                    gt_tti_value = gt_tti_value.item() > 0.5
                     eval = pred_tti_value.item() == gt_tti_value.item()
                 if eval is not None:
                     if gt_labels is None:
