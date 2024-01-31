@@ -186,7 +186,7 @@ class CSPQTTCHead(CSPTTCHead):
 
         loss_bbox = loss_bbox[0]
         loss_ttc = []
-        mid = 0
+        mid = None
         for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
             ttc = self.loss_ttc(ttc_pred, ttc_gt)
             if self.ttc_bins > 1:
@@ -214,14 +214,15 @@ class CSPQTTCHead(CSPTTCHead):
                 loss_L1ttc=loss_ttc.mean(),
                 loss_tv=loss_tv.mean(),
             )
-
-        return dict(
+        r_dict = dict(
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
             loss_offset=loss_offset,
             loss_qttc=loss_ttc,
-            MiD=mid * 1e4,
         )
+        if mid is not None:
+            r_dict['MiD'] = mid * 1e4,
+        return r_dict
 
     def mid_loss(self, ttc_preds, ttc_maps):
 
