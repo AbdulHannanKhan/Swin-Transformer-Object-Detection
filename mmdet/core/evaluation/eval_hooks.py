@@ -297,9 +297,9 @@ class DistEvalHook(EvalHook):
                     else:
                         print(f'{classes[i]}: 0 calculated over 0 points.')
                         mid_c = [10000]
-                    runner.log_buffer.output["MiD_"+classes[i]] = int(np.mean(mid_c))
+                    runner.log_buffer.output[self.error_func+"_"+classes[i]] = np.mean(mid_c)
                 print(f'TTC {self.error_func}: {np.mean(mid)} calculated over {len(mid)} points.')
-                runner.log_buffer.output["MiD"] = int(np.mean(mid))
+                runner.log_buffer.output[self.error_func] = np.mean(mid)
 
             if self.save_best:
                 self.save_best_checkpoint(runner, key_score)
