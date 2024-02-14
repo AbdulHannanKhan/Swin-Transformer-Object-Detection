@@ -29,7 +29,7 @@ except ImportError:
 class CSPMaps(object):
 
     def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False,
-                 bbox_ttc=False, image_shape=None, ttc_mode='continuous', ttc_bins=1, num_classes=1):
+                 bbox_ttc=False, image_shape=None, ttc_mode='continuous', ttc_bins=1, num_classes=1, bin_bias=0.5, bin_weight=0.1):
         self.radius = radius
         self.stride = stride
         self.regress_range = regress_range
@@ -40,6 +40,8 @@ class CSPMaps(object):
         self.bb_ttc = bbox_ttc
         self.ttc_mode = ttc_mode
         self.ttc_bins = ttc_bins
+        self.bin_bias = bin_bias
+        self.bin_weight = 0.1
 
     def __call__(self, results):
         """Call function to add csp maps to train pipeline.
@@ -169,7 +171,7 @@ class CSPMaps(object):
                                 ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
                                 if ttc_bins > 1:
                                     for i in range(ttc_bins):
-                                        if bbox_ttc > (0.1 * i + 0.5):
+                                        if bbox_ttc > (self.bin_weight * i + self.bin_bias):
                                             ttc_maps[1+i, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
                                 elif bbox_ttc > 1.0:
                                         ttc_maps[1, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1

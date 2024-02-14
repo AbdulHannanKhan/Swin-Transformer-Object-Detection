@@ -6,6 +6,7 @@ from ..builder import HEADS, build_loss
 from .csp_ttc_head import CSPTTCHead
 from mmdet.core import multi_apply, multiclass_nms, bbox2result
 from mmcv.runner import force_fp32
+import numpy as np
 
 INF = 1e8
 
@@ -40,6 +41,7 @@ class CSPQTTCHead(CSPTTCHead):
             self.bin_weights = torch.ones(ttc_bins, dtype=torch.float32) * 0.1
         else:
             assert len(bin_weights) == ttc_bins
+            bin_weights = np.array(bin_weights)
             self.bin_weights = torch.from_numpy(bin_weights)
 
         # move bin_weights to cuda
@@ -221,6 +223,8 @@ class CSPQTTCHead(CSPTTCHead):
             loss_qttc=loss_ttc,
         )
         if mid is not None:
+            if isinstance(mid, tuple):
+                mid = mid[0]
             r_dict['MiD'] = mid * 1e4,
         return r_dict
 

@@ -4,7 +4,8 @@ from .single_stage import SingleStageDetector
 from ...utils.logger import log_image_with_boxes
 import numpy as np
 import torch
-from ..losses import MiDLoss
+import copy
+from ..losses import MiDLoss, QTTCLoss
 
 
 @DETECTORS.register_module()
@@ -105,6 +106,8 @@ class CSP(SingleStageDetector):
 
         def mid_error(pred, gt):
             pred = pred.clamp(min=1e-10)
+            # print("\nPred: ", pred.min(), pred.max(), pred.mean())
+            # print("\nGt: ", gt.min(), gt.max(), gt.mean())
             return torch.abs(torch.log(gt) - torch.log(pred)) * 1e4
 
         def ttc_error(pred, gt, _check_range=(0, 10)):
@@ -137,9 +140,11 @@ class CSP(SingleStageDetector):
             tti_pred = outs[3]
             det_ttc = []
             tti_pred = tti_pred[0]
-            if tti_pred.shape[1] > 1:
-                tti_pred = self.bbox_head.bins2ttc(tti_pred.sigmoid())
-            tti_pred = tti_pred[0][0]
+            if tti_pred.shape[1] == 1:
+                tti_pred = tti_pred[0]
+            else:
+                tti_pred = tti_pred.permute(0, 2, 3, 1)
+            tti_pred = tti_pred[0]
             if error_func != "acc":
                 tti_pred = tti_pred.clamp(min=1e-10)
             else:
@@ -152,10 +157,12 @@ class CSP(SingleStageDetector):
             # mid = MiDLoss(loss_weight=1e4)
             # mid_array = mid(tti_pred[0], gt_tti[0].permute(0, 2, 3, 1))
             gt_tti = gt_tti[0].permute(0, 2, 3, 1)
-            if gt_tti.shape[1] > 2:
-                gt_tti = self.bbox_head.bins2ttc(gt_tti[:, 1:, :, :])
-            gt_tti = gt_tti[0][0]
 
+            if hasattr(self.bbox_head, 'ttc_bins') and self.bbox_head.ttc_bins == 1:
+                gt_tti = gt_tti[0][1]
+            else:
+                gt_tti = gt_tti[0][1:]
+                gt_tti = gt_tti.permute(1, 2, 0)
 
             det_ttc = []
             gt_bboxes = gt_bboxes[0][0]
@@ -169,6 +176,7 @@ class CSP(SingleStageDetector):
                 ttc_bins[i] = []
 
             a_seq = lambda _x: 0.2 * (_x + 1)
+            bias = []
 
             for i in range(len(gt_bboxes)):
                 gt_bbox = gt_bboxes[i]
@@ -203,9 +211,15 @@ class CSP(SingleStageDetector):
                     if error is not None:
                         mid_array.append(error.item())
                 else:
-                    pred_tti_value = pred_tti_value.item() > 0.5
-                    gt_tti_value = gt_tti_value.item() > 0.5
-                    eval = (1 - np.abs(pred_tti_value - gt_tti_value))*100
+                    pred_tti_value = pred_tti_value.reshape(-1)
+                    gt_tti_value = gt_tti_value.reshape(-1)
+
+                    pred_tti_value = pred_tti_value.cpu().numpy() > 0.5
+                    gt_tti_value = gt_tti_value.cpu().numpy() > 0.5
+
+                    # print("\n\n",pred_tti_value, gt_tti_value)
+                    eval = (pred_tti_value == gt_tti_value) + 0
+                    eval = np.concatenate((eval, gt_tti_value + 0), axis=0)
                 if eval is not None:
                     if gt_labels is None:
                         mid_array.append(eval)
@@ -233,7 +247,8 @@ class CSP(SingleStageDetector):
                 # calculate the tti_pred value at the det center
                 pred_tti_value = tti_pred[det_center[1], det_center[0]]
 
-                det_ttc.append(pred_tti_value.item())
+                det_ttc.append(-1)
+                # det_ttc.append(pred_tti_value.item())  //TODO:// Current not working, fix it later
 
             det_ttc = torch.tensor(det_ttc).to(tti_pred.device)
             # reshape to (n, 1)
@@ -264,7 +279,8 @@ class CSP(SingleStageDetector):
                 # calculate the tti_pred value at the det center
                 pred_tti_value = tti_pred[det_center[1], det_center[0]]
 
-                det_ttc.append(pred_tti_value.item())
+                det_ttc.append(-1)
+                # det_ttc.append(pred_tti_value.item())  //TODO::FIX THIS!!! Add actual ttc values to boxes
 
             det_ttc = torch.tensor(det_ttc).to(tti_pred.device)
             # reshape to (n, 1)

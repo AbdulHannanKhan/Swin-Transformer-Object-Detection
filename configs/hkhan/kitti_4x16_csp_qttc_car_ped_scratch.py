@@ -55,6 +55,8 @@ model = dict(
         feat_channels=256,
         bn_for_ttc=True,
         drop_ttc=0.5,
+        bin_bias=0.9,
+        bin_weights=[0.025 for i in range(8)],
         strides=[4],
         loss_cls=dict(
             type='CenterLoss',
@@ -117,7 +119,8 @@ train_pipeline = [
     dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
     dict(type='RandomPave', size=img_scale),
     dict(type='Normalize', **img_norm_cfg),
-    dict(type='CSPMaps', radius=2, with_width=width, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, with_ttc=True, num_classes=num_classes, ttc_mode='quantized', ttc_bins=8),
+    dict(type='CSPMaps', radius=2, with_width=width, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, with_ttc=True, 
+        bin_bias=0.9, bin_weight=[0.025 for i in range(8)], num_classes=num_classes, ttc_mode='quantized', ttc_bins=8),
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'classification_maps',
                                'scale_maps', 'offset_maps', 'ttc_maps']),
@@ -135,7 +138,8 @@ test_pipeline = [
             dict(type='Resize', keep_ratio=True),
             dict(type='RemoveSmallBoxes', min_box_size=8, min_gt_box_size=8),
             dict(type='Normalize', **img_norm_cfg),
-            dict(type='CSPMaps', radius=2, with_width=width, stride=4, regress_range=(-1, 1e8), with_ttc=True, num_classes=num_classes, ttc_mode='quantized', ttc_bins=8),
+            dict(type='CSPMaps', radius=2, with_width=width, stride=4, regress_range=(-1, 1e8), image_shape=img_scale, with_ttc=True, 
+        bin_bias=0.9, bin_weight=[0.025 for i in range(8)], num_classes=num_classes, ttc_mode='quantized', ttc_bins=8),
             dict(type='ImageToTensor', keys=['img', 'ttc_maps']),
             dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'classification_maps', 'scale_maps', 'offset_maps', 'ttc_maps']),
        ],
@@ -165,23 +169,23 @@ data = dict(
     train=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_train_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/train.json",
         img_prefix=data_root,
         pipeline=train_pipeline,
     ),
     val=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_val_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/val.json",
         img_prefix=data_root,
         pipeline=test_pipeline,
     ),
     test=dict(
         type="CocoTTCDataset",
         classes=classes,
-        ann_file="/netscratch/hkhan/kitti/kitti_val_ttc.json",
+        ann_file="/netscratch/hkhan/kitti/val.json",
         img_prefix=data_root,
-        pipeline=demo_pipeline,
+        pipeline=test_pipeline,
     ),
 )
 
@@ -193,7 +197,7 @@ optimizer_config=dict(mean_teacher=dict(alpha=0.999))
 # optimizer_config = dict(_delete_=True, grad_clip=dict(max_norm=32, norm_type=2))
 fp16 = None # dict(loss_scale=16.)
 
-evaluation=dict(classwise=True, metric='bbox', with_ttc=True)
+evaluation=dict(classwise=True, metric='bbox', with_ttc=True, ttc_error_func="acc")
 
 log_config = dict(
     interval=50,
@@ -204,7 +208,7 @@ log_config = dict(
             init_kwargs=dict(
                 entity="hannankhan",
                 project="KittiTTC",
-                name="csp_qttc_nus_68",
+                name="qttc_5-13",
                 config=dict(
                     work_dirs="${work_dir}",
                     total_step="${runner.max_epochs}",
@@ -215,5 +219,5 @@ log_config = dict(
     ],
 )
 
-
-load_from="./work_dirs/nu_obj_4x8_csp_ttc_sel_front/epoch_68.pth"
+load_from=None
+# load_from="./work_dirs/nu_obj_4x8_csp_ttc_sel_front/epoch_68.pth"

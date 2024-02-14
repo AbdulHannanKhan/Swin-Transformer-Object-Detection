@@ -32,8 +32,13 @@ def single_gpu_test(model,
     delta = 0
     count = 0
 
+    kick = True
+
     for i, data in enumerate(data_loader):
         with torch.no_grad():
+            if kick:
+                kick = False
+                model(return_loss=False, rescale=True, **data)
             st = time.time()
             if ttc_loss:
                 result, mid = model(return_loss=False, rescale=True, error_func=error_func, check_range=check_range, **data)

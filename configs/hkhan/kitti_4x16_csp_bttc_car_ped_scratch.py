@@ -217,5 +217,6 @@ log_config = dict(
     ],
 )
 
-load_from="./work_dirs/kitti_4x16_csp_bttc_car_ped/epoch_28.pth"
+load_from=None
+# load_from="./work_dirs/kitti_4x16_csp_bttc_car_ped/epoch_28.pth"
 # load_from="./work_dirs/nu_obj_4x8_csp_ttc_sel_front/epoch_68.pth"

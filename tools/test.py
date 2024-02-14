@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument('checkpoint', help='checkpoint file')
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument('--with-mid', action='store_true', help='calculate MiD loss')
+    parser.add_argument('--bttc', action='store_true', help='use accuracy metric for ttc eval mode')
     parser.add_argument('--samples', type=int, default=1)
     parser.add_argument(
         '--fuse-conv-bn',
@@ -214,6 +215,8 @@ def main():
             broadcast_buffers=False)
         if args.with_mid:
             outputs, mid, classes = multi_gpu_test(model, data_loader, args.tmpdir, args.gpu_collect, error_func="mid", check_range=check_range, log=False, ttc_loss=True)
+        elif args.bttc:
+            outputs, mid, classes = multi_gpu_test(model, data_loader, args.tmpdir, args.gpu_collect, error_func="acc", check_range=check_range, log=False, ttc_loss=True)
         else:
             outputs = multi_gpu_test(model, data_loader, args.tmpdir, args.gpu_collect, log=False)
 
@@ -248,18 +251,32 @@ def main():
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
 
-            if args.with_mid:
+            if args.with_mid or args.bttc:
+                metric = "acc" if args.bttc else "mid"
                 if isinstance(mid, list):
-                    mid = np.array(mid).reshape((-1, 2))
-                    cls, mid = mid[:, 0], mid[:, 1]
+                    # mid = np.array(mid).reshape((-1, 2))
+                    cls, mid = mid[::2], mid[1::2]
+                    cls = np.array(cls)
+                    mid = np.array(mid)
+                    bins = mid.shape[1]//2
+                    bias = mid[:, bins:]
+                    mid = mid[:, :bins]
                     for i in range(len(classes)):
                         mid_c = cls == i
+                        bias_c = bias[mid_c]
                         mid_c = mid[mid_c]
                         if len(mid_c) > 0:
-                            print(f'{classes[i]} :: TTC mid: {int(np.mean(mid_c))} calculated over {np.array(mid_c).shape} points.')
+                            if len(mid_c[0]) == 1:
+                                print(f'{classes[i]} :: TTC {metric}: {np.mean(mid_c)} calculated over {np.array(mid_c).shape} points with bias {np.mean(bias)}.')
+                            else:
+                                for b in range(len(mid_c[0])):
+                                    bin_accs = mid_c[:, b].reshape(-1)
+                                    bin_bias = bias_c[:, b].reshape(-1)
+                                    print(f'{classes[i]} :: TTC {metric} for bin {b}: {np.mean(bin_accs)} calculated over {np.array(bin_accs).shape} points with bias {np.mean(bin_bias)}.')
+                                print(f'{classes[i]} :: TTC {metric} all bins: {np.mean(mid_c)} calculated over {np.array(mid_c).shape} points with bias {np.mean(bias_c)}.')
                         else:
-                            print(f'{classes[i]} :: TTC mid: 0 calculated over 0 points.')
-                    print(f'TTC mid: {int(np.mean(mid))} calculated over {np.array(mid).shape} points.')
+                            print(f'{classes[i]} :: TTC {metric}: 0 calculated over 0 points.')
+                    print(f'TTC mid: {np.mean(mid)} calculated over {np.array(mid).shape} points with bias {np.mean(bias)}.')
                 else:
                     a_seq = lambda _x: 0.2 * (_x + 1)
                     bucket_means = []
