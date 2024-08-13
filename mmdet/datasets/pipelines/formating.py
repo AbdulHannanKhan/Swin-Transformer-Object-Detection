@@ -312,6 +312,8 @@ class Collect(object):
         data = {}
         img_meta = {}
         for key in self.meta_keys:
+            if (key == 'scale_factor') and (key not in results):
+                results[key] = 1.0
             img_meta[key] = results[key]
         data['img_metas'] = DC(img_meta, cpu_only=True)
         for key in self.keys:

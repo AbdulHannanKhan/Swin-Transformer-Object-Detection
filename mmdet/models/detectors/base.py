@@ -245,6 +245,8 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
                 averaging the logs.
         """
         losses = self(**data)
+        if "MiD" in losses and type(losses["MiD"] is tuple):
+            losses["MiD"] = losses["MiD"][0]
         loss, log_vars = self._parse_losses(losses)
 
         outputs = dict(

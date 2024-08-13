@@ -253,9 +253,12 @@ def get_cls_results(det_results, annotations, class_id):
     cls_gts_ignore = []
     for ann in annotations:
         gt_inds = ann['labels'] == class_id
+        ann["bboxes"] = np.array(ann["bboxes"]).reshape(-1, 4)
+        # ann["bboxes_ignore"] = np.array(ann["bboxes_ignore"])
         cls_gts.append(ann['bboxes'][gt_inds, :])
 
         if ann.get('labels_ignore', None) is not None:
+            ann["bboxes_ignore"] = np.array(ann["bboxes_ignore"])
             ignore_inds = ann['labels_ignore'] == class_id
             cls_gts_ignore.append(ann['bboxes_ignore'][ignore_inds, :])
         else:
@@ -308,7 +311,6 @@ def eval_map(det_results,
         tuple: (mAP, [dict, dict, ...])
     """
     assert len(det_results) == len(annotations)
-
     num_imgs = len(det_results)
     num_scales = len(scale_ranges) if scale_ranges is not None else 1
     num_classes = len(det_results[0])  # positive class num
@@ -332,11 +334,10 @@ def eval_map(det_results,
                 f'tpfp_fn has to be a function or None, but got {tpfp_fn}')
 
         # compute tp and fp for each image with multiple processes
+        cls_zip = zip(cls_dets, cls_gts, cls_gts_ignore, [iou_thr for _ in range(num_imgs)], [area_ranges for _ in range(num_imgs)])
         tpfp = pool.starmap(
             tpfp_fn,
-            zip(cls_dets, cls_gts, cls_gts_ignore,
-                [iou_thr for _ in range(num_imgs)],
-                [area_ranges for _ in range(num_imgs)]))
+            cls_zip)
         tp, fp = tuple(zip(*tpfp))
         # calculate gt number of each scale
         # ignored gts or gts beyond the specific scale are not counted

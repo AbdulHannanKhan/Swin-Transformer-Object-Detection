@@ -15,6 +15,7 @@ from terminaltables import AsciiTable
 from mmdet.core import eval_recalls
 from .builder import DATASETS
 from .custom import CustomDataset
+from .eval_mr import COCOeval as COCOMReval
 
 
 @DATASETS.register_module()
@@ -211,8 +212,9 @@ class CocoDataset(CustomDataset):
                 data['image_id'] = img_id
                 data['bbox'] = self.xyxy2xywh(bboxes[i])
                 data['score'] = float(bboxes[i][4])
-                data['category_id'] = 1
+                data['category_id'] = self.cat_ids[label]
                 json_results.append(data)
+        
         return json_results
 
     def _det2json(self, results):
@@ -230,6 +232,7 @@ class CocoDataset(CustomDataset):
                     data['score'] = float(bboxes[i][4])
                     data['category_id'] = self.cat_ids[label]
                     json_results.append(data)
+        
         return json_results
 
     def _segm2json(self, results):
@@ -289,6 +292,8 @@ class CocoDataset(CustomDataset):
             dict[str: str]: Possible keys are "bbox", "segm", "proposal", and \
                 values are corresponding filenames.
         """
+        outfile_prefix = "/netscratch/hkhan/kitti/best_ttc"
+        print('writing results to json file to {}.bbox.json'.format(outfile_prefix))
         result_files = dict()
         if isinstance(results[0], list):
             json_results = self._det2json(results)
@@ -354,6 +359,7 @@ class CocoDataset(CustomDataset):
             'The length of results is not equal to the dataset len: {} != {}'.
             format(len(results), len(self)))
 
+        print(jsonfile_prefix)
         if jsonfile_prefix is None:
             tmp_dir = tempfile.TemporaryDirectory()
             jsonfile_prefix = osp.join(tmp_dir.name, 'results')
@@ -370,7 +376,8 @@ class CocoDataset(CustomDataset):
                  classwise=False,
                  proposal_nums=(100, 300, 1000),
                  iou_thrs=None,
-                 metric_items=None):
+                 cats=None,
+                 metric_items=None, **kwargs):
         """Evaluation in COCO protocol.
 
         Args:
@@ -401,6 +408,32 @@ class CocoDataset(CustomDataset):
         Returns:
             dict[str, float]: COCO style evaluation metric.
         """
+
+        if "mr2" in metric:
+            result_files = self.results2json(results, "./work_dirs/st/latest")
+
+            cocoGt = self.coco
+            imgIds = cocoGt.getImgIds()
+            try:
+               bbox_file = result_files["bbox"]
+               cocoDt = cocoGt.loadRes(bbox_file)
+            except IndexError:
+               print('No prediction found.')
+               return
+            metrics = ['Reasonable', 'Small', 'Heavy', 'ALL']
+            cocoEval = COCOMReval(cocoGt, cocoDt, 'bbox')
+            cocoEval.params.imgIds = imgIds
+            output = dict()
+            for id_setup in range(4):
+               cocoEval.evaluate(id_setup)
+               cocoEval.accumulate()
+               cocoEval.summarize(id_setup)
+
+               key = '{}'.format(metrics[id_setup])
+               val = float('{:.3f}'.format(cocoEval.stats[id_setup]))
+               output[key] = val
+
+            return output
 
         metrics = metric if isinstance(metric, list) else [metric]
         allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
@@ -446,9 +479,12 @@ class CocoDataset(CustomDataset):
                     level=logging.ERROR)
                 break
 
+            if cats is None:
+                cats = self.cat_ids
+
             iou_type = 'bbox' if metric == 'proposal' else metric
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
-            cocoEval.params.catIds = self.cat_ids
+            cocoEval.params.catIds = cats
             cocoEval.params.imgIds = self.img_ids
             cocoEval.params.maxDets = list(proposal_nums)
             cocoEval.params.iouThrs = iou_thrs

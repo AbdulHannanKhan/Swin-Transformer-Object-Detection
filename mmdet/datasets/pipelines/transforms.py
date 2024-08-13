@@ -3,11 +3,14 @@ import inspect
 
 import mmcv
 import numpy as np
+import cv2
 from numpy import random
+import math
 
 from mmdet.core import PolygonMasks
 from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
 from ..builder import PIPELINES
+from .compose import Compose as Comp
 
 try:
     from imagecorruptions import corrupt
@@ -20,6 +23,235 @@ try:
 except ImportError:
     albumentations = None
     Compose = None
+
+
+@PIPELINES.register_module()
+class CSPMaps(object):
+
+    def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False,
+                 bbox_ttc=False, image_shape=None, ttc_mode='continuous', ttc_bins=1, num_classes=1, bin_bias=0.5, bin_weight=0.1):
+        self.radius = radius
+        self.stride = stride
+        self.regress_range = regress_range
+        self.image_shape = image_shape
+        self.num_classes = num_classes
+        self.with_width=with_width
+        self.with_ttc = with_ttc
+        self.bb_ttc = bbox_ttc
+        self.ttc_mode = ttc_mode
+        self.ttc_bins = ttc_bins
+        self.bin_bias = bin_bias
+        self.bin_weight = 0.1
+
+    def __call__(self, results):
+        """Call function to add csp maps to train pipeline.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: results, 'pos_map', 'scale_map', 'offset_map', keys are added into result dict.
+        """
+
+        if self.image_shape is None:
+            self.image_shape = results['img'].shape
+
+        if self.with_ttc:
+            gts, igs, ttc, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results["gt_tti"], results['gt_labels']
+            pos_map, scale_map, offset_map, ttc = self.calc_gt_center(gts, igs, labels, self.num_classes, ttc=ttc,
+                                                                      ttc_mode=self.ttc_mode, ttc_bins=self.ttc_bins)
+            results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map, ttc_maps=ttc))
+        else:
+            gts, igs, labels = results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_labels']
+            pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs, labels, self.num_classes)
+            results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
+
+        return results
+
+    def calc_gt_center(self, gts, igs, labels=None, classes=1, ttc=None, ttc_mode='continuous', ttc_bins=1):
+
+        image_shape = self.image_shape
+        radius = self.radius
+        stride = self.stride
+        regress_range = self.regress_range
+
+        def gaussian(kernel):
+            sigma = ((kernel-1) * 0.5 - 1) * 0.3 + 0.8
+            s = 2*(sigma**2)
+            dx = np.exp(-np.square(np.arange(kernel) - int(kernel / 2)) / s)
+            return np.reshape(dx, (-1, 1))
+        radius = int(radius/stride)
+        scale_map = np.zeros((3 if self.with_width else 2, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        offset_map = np.zeros((3, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        pos_map = np.zeros((2*classes+1, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+        if ttc is not None:
+            ttc_maps = np.zeros((ttc_bins + 1, int(image_shape[0] / stride), int(image_shape[1] / stride)), dtype=np.float32)
+
+        pos_map[0, :, :, ] = 1  # channel 0 : for ignore; channel 1+2*i: for loss weights , ignore area will be set to 0; channel 2+2*i: classification
+
+        if not igs is None and len(igs) > 0:
+            igs = igs / stride
+            for ind in range(len(igs)):
+                x1, y1, x2, y2 = int(igs[ind, 0]), int(igs[ind, 1]), int(np.ceil(igs[ind, 2])), int(np.ceil(igs[ind, 3]))
+                pos_map[0, y1:y2, x1:x2] = 0
+        half_height = gts[:, 3] - gts[:, 1]
+        half_height = (half_height >= regress_range[0]) & (half_height <= regress_range[1])
+        inds = half_height.nonzero()
+        gts = gts[inds]
+
+        # deep copy gts
+        gts_org = copy.deepcopy(gts)
+
+        if ttc is not None:
+            ttc = ttc[inds]
+        if len(gts) > 0:
+            gts = gts / stride
+            for ind in range(len(gts)):
+                x1, y1, x2, y2 = int(np.ceil(gts[ind, 0])), int(np.ceil(gts[ind, 1])), int(gts[ind, 2]), int(gts[ind, 3])
+                c_x, c_y = int((gts[ind, 0] + gts[ind, 2]) / 2), int((gts[ind, 1] + gts[ind, 3]) / 2)
+
+                if ttc is not None:
+                    bbox_ttc = ttc[ind]
+
+                dx = gaussian(x2-x1)
+                dy = gaussian(y2-y1)
+                gau_map = np.multiply(dy, np.transpose(dx))
+
+                # check if c_x and c_y are in the image
+                if c_x < 0 or c_x >= image_shape[1] / stride or c_y < 0 or c_y >= image_shape[0] / stride:
+                    # print("Rejected ann, out of bound! c_x: {}, c_y: {}".format(c_x, c_y))
+                    continue
+
+                if labels is not None and pos_map[1+2*labels[ind], y1:y2, x1:x2].shape == gau_map.shape:
+                    pos_map[1+2*labels[ind], y1:y2, x1:x2] = np.maximum(pos_map[1+2*labels[ind], y1:y2, x1:x2], gau_map)  # gauss map
+                    pos_map[0, y1:y2, x1:x2] = 1  # 1-mask map
+                    pos_map[2+2*labels[ind], c_y, c_x] = 1  # center map
+
+                if np.log(gts[ind, 3] - gts[ind, 1]) < 1 or np.log(gts[ind, 2] - gts[ind, 0]) < 1:
+                    # print(f"Too small object detected! {labels[ind]} {c_x} {c_y} {gts_org[ind, 2] - gts_org[ind, 0]} {gts_org[ind, 3] - gts_org[ind, 1]}")
+                    pass
+
+                scale_map[0, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 3] - gts[ind, 1])  #value of height
+                if self.with_width:
+                    scale_map[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = np.log(gts[ind, 2] - gts[ind, 0])
+                scale_map[-1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1  # 1-mask
+
+                if ttc is not None:
+                    if not(np.isnan(bbox_ttc) or bbox_ttc == 0):
+                        # Theoretical limit of the system
+                        # using motion in depth (MiD) = 1 - T/ttc
+                        # ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = math.atan(bbox_ttc)/math.pi # 1 - 1/(bbox_ttc*frame_capture_frequency)
+
+                        # make sure bbox_ttc is in range [0.5, 1.3]
+                        bbox_ttc = np.clip(bbox_ttc, 0.5, 1.3)
+
+                        if self.bb_ttc:
+                            h75 = (y2-y1) * 0.5
+                            w75 = (x2-x1) * 0.5
+
+                            x1_r = int(np.ceil(c_x - w75/2))
+                            x2_r = int(np.ceil(c_x + w75/2))
+
+                            y1_r = int(np.ceil(c_y - h75/2))
+                            y2_r = int(np.ceil(c_y + h75/2))
+
+                            dx_r = gaussian(x2_r-x1_r)
+                            dy_r = gaussian(y2_r-y1_r)
+                            gau_map_r = np.multiply(dy_r, np.transpose(dx_r))
+
+                            ttc_maps[0, y1_r:y2_r, x1_r:x2_r] = bbox_ttc
+                            ttc_maps[1, y1_r:y2_r, x1_r:x2_r] = np.maximum(ttc_maps[1, y1_r:y2_r, x1_r:x2_r], gau_map_r)
+                        elif ttc_mode == 'continuous':
+                            ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = bbox_ttc
+                            ttc_maps[1, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+                        else:
+                            if 0.998 < bbox_ttc < 1.002:
+                                pass  # ignoring values +15 < ttc < -15, @30fps
+                            else:
+                                ttc_maps[0, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
+                                if ttc_bins > 1:
+                                    for i in range(ttc_bins):
+                                        if bbox_ttc > (self.bin_weight * i + self.bin_bias):
+                                            ttc_maps[1+i, c_y-radius:c_y+radius+1, c_x-radius:c_x+radius+1] = 1
+                                elif bbox_ttc > 1.0:
+                                        ttc_maps[1, c_y - radius:c_y + radius + 1, c_x - radius:c_x + radius + 1] = 1
+
+                offset_map[0, c_y, c_x] = (gts[ind, 1] + gts[ind, 3]) / 2 - c_y - 0.5  # height-Y offset
+                offset_map[1, c_y, c_x] = (gts[ind, 0] + gts[ind, 2]) / 2 - c_x - 0.5  # width-X offset
+                offset_map[2, c_y, c_x] = 1  # 1-mask
+
+        if ttc is not None:
+            return pos_map, scale_map, offset_map, ttc_maps
+        return pos_map, scale_map, offset_map
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(img_shape={self.img_shape}, '
+        repr_str += f'radius={self.radius}, '
+        repr_str += f'stride={self.stride}, '
+        repr_str += f'regress_range={self.regress_range}, '
+        return repr_str
+
+
+@PIPELINES.register_module()
+class RemoveSmallBoxes(object):
+    """Removes detections smaller than a threshold
+
+    This transform remove the small detections, intended to keep detector from
+    learning to classify small blobs which can result in high loss since these
+    examples will be very hard to train on given resolution
+
+    Args:
+        min_box_size (float or int): boxes below this threshold will be removed
+            hence area under the blob will be considered as background.
+        min_gt_box_size (float or int): boxes between min_gt_box_size and
+            min_box_size will be move to gt_bboxes_ignore and all boxes with
+            height greater than min_gt_box_size will be kept.
+    """
+    def __init__(self,
+                 min_box_size=8,
+                 min_gt_box_size=16,
+                 ):
+        super(RemoveSmallBoxes, self).__init__()
+        self.min_box_size = min_box_size
+        self.min_gt_box_size = min_gt_box_size
+
+    def __call__(self, results):
+
+        gt_bboxes = results["gt_bboxes"].copy()
+        gt_bboxes_ignore = results["gt_bboxes_ignore"].copy()
+        if self.min_box_size <= 0 or gt_bboxes.shape[0] == 0:
+            return results
+
+
+        gt_bboxes_edges = gt_bboxes[:, [2, 3]] - gt_bboxes[:, [0, 1]]
+
+        valid_inds = (gt_bboxes_edges[:, 0] >= self.min_gt_box_size) & (
+                gt_bboxes_edges[:, 1] >= self.min_gt_box_size)
+        gt_bboxes = gt_bboxes[valid_inds, :]
+        if "gt_labels" in results:
+            results["gt_labels"] = results["gt_labels"][valid_inds]
+
+        if "gt_tti" in results:
+            results["gt_tti"] = results["gt_tti"][valid_inds]
+
+        gt_bboxes_ignore_edges = gt_bboxes_ignore[:, [2, 3]] - gt_bboxes_ignore[:, [0, 1]]
+        valid_inds = (gt_bboxes_ignore_edges[:, 0] >= self.min_box_size) & (
+                gt_bboxes_ignore_edges[:, 1] >= self.min_box_size)
+        gt_bboxes_ignore = gt_bboxes_ignore[valid_inds, :]
+        if "gt_labels_ignore" in results:
+            results["gt_labels_ignore"] = results["gt_labels_ignore"][valid_inds]
+
+        results["gt_bboxes"] = gt_bboxes
+        results["gt_bboxes_ignore"] = gt_bboxes_ignore
+
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(discard_below={self.min_box_size}, '
+        repr_str += f'consider={self.min_gt_box_size}, '
+        return repr_str
 
 
 @PIPELINES.register_module()
@@ -299,10 +531,12 @@ class Resize(object):
                     results.pop('scale_factor')
                 self._random_scale(results)
 
+        # print("Before: ", results['img'].shape)
         self._resize_img(results)
         self._resize_bboxes(results)
         self._resize_masks(results)
         self._resize_seg(results)
+        # print("After: ", results['img'].shape, " Scale Factor: ", results['scale_factor'])
         return results
 
     def __repr__(self):
@@ -585,6 +819,85 @@ class Normalize(object):
 
 
 @PIPELINES.register_module()
+class RandomBrightness(object):
+    def __init__(self,
+                 _min=0.5,
+                 _max=2.0):
+
+        self.min = _min
+        self.max = _max
+
+    def _brightness(self, image):
+        '''
+        Randomly change the brightness of the input image.
+        Protected against overflow.
+        '''
+        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        random_br = np.random.uniform(self.min, self.max)
+
+        # To protect against overflow: Calculate a mask for all pixels
+        # where adjustment of the brightness would exceed the maximum
+        # brightness value and set the value to the maximum at those pixels.
+        mask = hsv[:, :, 2] * random_br > 255
+        v_channel = np.where(mask, 255, hsv[:, :, 2] * random_br)
+        hsv[:, :, 2] = v_channel
+
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    def __call__(self, results):
+        if np.random.randint(0, 2) == 0:
+            results["img"] = self._brightness(results["img"])
+        return results
+
+
+@PIPELINES.register_module()
+class OneOf(object):
+
+    def __init__(self, transforms, prob=0.5):
+        self.prob = prob
+        assert len(transforms) > 1
+        self.transforms = [Comp([p]) for p in transforms]
+
+    def __call__(self, results):
+
+        if np.random.rand(1)[0] < self.prob:
+            choice = np.random.choice(self.transforms)
+            return choice(results)
+        return results
+
+
+@PIPELINES.register_module()
+class RandomPave(object):
+
+    def __init__(self, size):
+        self.size = size
+
+    def random_pave(self, image, gts, igs):
+        img_height, img_width = image.shape[0:2]
+        pave_h, pave_w = self.size
+
+        paved_image = np.ones((pave_h, pave_w, 3), dtype=image.dtype) * np.mean(image, dtype=int)
+        pave_x = int(np.random.randint(0, pave_w - img_width + 1))
+        pave_y = int(np.random.randint(0, pave_h - img_height + 1))
+        paved_image[pave_y:pave_y + img_height, pave_x:pave_x + img_width] = image
+        # pave detections
+        if len(igs) > 0:
+            igs[:, 0:4:2] += pave_x
+            igs[:, 1:4:2] += pave_y
+
+        if len(gts) > 0:
+            gts[:, 0:4:2] += pave_x
+            gts[:, 1:4:2] += pave_y
+
+        return paved_image, gts, igs
+
+    def __call__(self, results):
+        results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'] = \
+            self.random_pave(results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'])
+        return results
+
+
+@PIPELINES.register_module()
 class RandomCrop(object):
     """Random crop the image & bboxes & masks.
 
@@ -691,6 +1004,8 @@ class RandomCrop(object):
                 bboxes[:, 3] > bboxes[:, 1])
             # If the crop does not contain any gt-bbox area and
             # allow_negative_crop is False, skip this image.
+            if key == 'gt_bboxes' and 'gt_tti' in results:
+                results['gt_tti'] = results['gt_tti'][valid_inds]
             if (key == 'gt_bboxes' and not valid_inds.any()
                     and not allow_negative_crop):
                 return None

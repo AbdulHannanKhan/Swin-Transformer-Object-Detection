@@ -28,6 +28,15 @@ from .transformer_head import TransformerHead
 from .vfnet_head import VFNetHead
 from .yolact_head import YOLACTHead, YOLACTProtonet, YOLACTSegmHead
 from .yolo_head import YOLOV3Head
+from .csp_head import CSPHead
+from .csp_trans_head import CSPTransHead
+from .csp_full_trans import CSPFullTransHead
+from .dfdn import DFDN
+from .csp_ttc_head import CSPTTCHead
+from .csp_mid_head import CSPMiDHead
+from .dfdn_ttc import DFDNTTC
+from .csp_qttc_head import CSPQTTCHead
+# from .fcos_tti_head import FCOSTTIHead
 
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
@@ -37,5 +46,6 @@ __all__ = [
     'PISARetinaHead', 'PISASSDHead', 'GFLHead', 'CornerHead', 'YOLACTHead',
     'YOLACTSegmHead', 'YOLACTProtonet', 'YOLOV3Head', 'PAAHead',
     'SABLRetinaHead', 'CentripetalHead', 'VFNetHead', 'TransformerHead',
-    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead'
+    'StageCascadeRPNHead', 'CascadeRPNHead', 'EmbeddingRPNHead', 'LDHead', 'CSPMiDHead', 'CSPQTTCHead',
+    'CSPHead', 'CSPTransHead', 'CSPFullTransHead', 'DFDN', 'CSPTTCHead', 'DFDNTTC' # 'FCOSTTIHead',
 ]
