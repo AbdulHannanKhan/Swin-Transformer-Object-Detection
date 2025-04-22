@@ -8,7 +8,6 @@ from mmcv.runner import Hook
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.utils.data import DataLoader
 
-
 class EvalHook(Hook):
     """Evaluation hook.
 
@@ -51,6 +50,8 @@ class EvalHook(Hook):
                  by_epoch=True,
                  save_best=None,
                  rule=None,
+                 with_ttc=False,
+                 ttc_error_func="mid",
                  **eval_kwargs):
         if not isinstance(dataloader, DataLoader):
             raise TypeError('dataloader must be a pytorch DataLoader, but got'
@@ -70,7 +71,8 @@ class EvalHook(Hook):
         self.save_best = save_best
         self.eval_kwargs = eval_kwargs
         self.initial_epoch_flag = True
-
+        self.with_ttc = with_ttc
+        self.error_func = ttc_error_func
         if self.save_best is not None:
             self._init_rule(rule, self.save_best)
 
@@ -139,8 +141,27 @@ class EvalHook(Hook):
         if not self.by_epoch or not self.evaluation_flag(runner):
             return
         from mmdet.apis import single_gpu_test
-        results = single_gpu_test(runner.model, self.dataloader, show=False)
+        results, mid, classes, seg_iou, seg_perclass_iou_listsoflists = single_gpu_test(runner.model, self.dataloader, show=False)
+        # key_score = self.evaluate(runner, results)
+        print('\n')
         key_score = self.evaluate(runner, results)
+        if self.with_ttc:
+            mid = np.array(mid).reshape((-1, 2))
+            cls, mid = mid[:, 0], mid[:, 1]
+            for i in range(len(classes)):
+                mask = cls == i
+                mid_c = mid[mask]
+                if len(mid_c) > 0:
+                    print(f'{classes[i]}: {np.mean(mid_c)} calculated over {len(mid_c)} points.')
+                else:
+                    print(f'{classes[i]}: 0 calculated over 0 points.')
+                    mid_c = [10000]
+                runner.log_buffer.output[self.error_func+"_"+classes[i]] = np.mean(mid_c)
+            print(f'TTC {self.error_func}: {np.mean(mid)} calculated over {len(mid)} points.')
+            runner.log_buffer.output[self.error_func] = np.mean(mid)
+            runner.log_buffer.output['seg_iou_val'] = sum(seg_iou) / len(seg_iou)
+            runner.log_buffer.output['seg_iou_val_per_class'] = [round(value, 4) for value in (np.array(seg_perclass_iou_listsoflists).sum(axis=0)/len(np.array(seg_perclass_iou_listsoflists))).tolist()] #Give mean of per class (mean over all images)
+
         if self.save_best:
             self.save_best_checkpoint(runner, key_score)
 
@@ -270,7 +291,7 @@ class DistEvalHook(EvalHook):
         if tmpdir is None:
             tmpdir = osp.join(runner.work_dir, '.eval_hook')
         if self.with_ttc:
-            results, mid, classes = multi_gpu_test(
+            results, mid, classes,seg_iou, seg_perclass_iou_listsoflists = multi_gpu_test(
                 runner.model,
                 self.dataloader,
                 tmpdir=tmpdir,
@@ -300,6 +321,8 @@ class DistEvalHook(EvalHook):
                     runner.log_buffer.output[self.error_func+"_"+classes[i]] = np.mean(mid_c)
                 print(f'TTC {self.error_func}: {np.mean(mid)} calculated over {len(mid)} points.')
                 runner.log_buffer.output[self.error_func] = np.mean(mid)
+                runner.log_buffer.output['seg_iou_val'] = sum(seg_iou) / len(seg_iou)
+                runner.log_buffer.output['seg_iou_val_per_class'] = [round(value, 4) for value in (np.array(seg_perclass_iou_listsoflists).sum(axis=0)/len(np.array(seg_perclass_iou_listsoflists))).tolist()] #Give mean of per class (mean over all images)
 
             if self.save_best:
                 self.save_best_checkpoint(runner, key_score)

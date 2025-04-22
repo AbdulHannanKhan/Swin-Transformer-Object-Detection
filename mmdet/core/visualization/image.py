@@ -132,24 +132,24 @@ def imshow_det_bboxes(img,
         np_poly = np.array(poly).reshape((4, 2))
         polygons.append(Polygon(np_poly))
         color.append(bbox_color)
-        label_text = class_names[
-            label] if class_names is not None else f'class {label}'
-        if len(bbox) > 4:
-            label_text += f'|{bbox[-1]:.02f}'
-        ax.text(
-            bbox_int[0],
-            bbox_int[1],
-            f'{label_text}',
-            bbox={
-                'facecolor': 'black',
-                'alpha': 0.8,
-                'pad': 0.7,
-                'edgecolor': 'none'
-            },
-            color=text_color,
-            fontsize=font_size,
-            verticalalignment='top',
-            horizontalalignment='left')
+        # label_text = class_names[
+        #     label] if class_names is not None else f'class {label}'
+        # if len(bbox) > 4:
+        #     label_text += f'|{bbox[-1]:.02f}'
+        # ax.text(
+        #     bbox_int[0],
+        #     bbox_int[1],
+        #     f'{label_text}',
+        #     bbox={
+        #         'facecolor': 'black',
+        #         'alpha': 0.8,
+        #         'pad': 0.7,
+        #         'edgecolor': 'none'
+        #     },
+        #     color=text_color,
+        #     fontsize=font_size,
+        #     verticalalignment='top',
+        #     horizontalalignment='left')
         if segms is not None:
             color_mask = mask_colors[labels[i]]
             mask = segms[i].astype(bool)
@@ -185,6 +185,259 @@ def imshow_det_bboxes(img,
 
     return img
 
+
+def imshow_det_bboxes_with_ttc(img,
+                               bboxes,
+                               labels,
+                               segms=None,
+                               score_thr=0.4,  # Updated to filter by score_thr
+                               bbox_color='green',
+                               text_color='black',
+                               mask_color=None,
+                               thickness=2,
+                               font_size=15,  # Increase font size for TTC
+                               win_name='',
+                               show=True,
+                               wait_time=0,
+                               out_file=None):
+    """Draw bboxes and TTC values (with scores) on an image."""
+
+    assert bboxes.ndim == 2, \
+        f'bboxes ndim should be 2, but its ndim is {bboxes.ndim}.'
+    assert labels.ndim == 1, \
+        f'labels ndim should be 1, but its ndim is {labels.ndim}.'
+    assert bboxes.shape[0] == labels.shape[0], \
+        'bboxes.shape[0] and labels.shape[0] should have the same length.'
+    assert bboxes.shape[1] == 6, \
+        f'bboxes.shape[1] should be 6 (4 coords, 1 score, 1 TTC), but its {bboxes.shape[1]}.'
+
+    img = mmcv.imread(img).astype(np.uint8)
+
+    # Filter bboxes based on score threshold
+    if score_thr > 0:
+        scores = bboxes[:, 4]
+        inds = scores > score_thr
+        bboxes = bboxes[inds, :]
+        labels = labels[inds]
+        if segms is not None:
+            segms = segms[inds, ...]
+
+    bbox_color = color_val_matplotlib(bbox_color)
+    text_color = color_val_matplotlib(text_color)
+
+    img = mmcv.bgr2rgb(img)
+    width, height = img.shape[1], img.shape[0]
+    img = np.ascontiguousarray(img)
+
+    fig = plt.figure(win_name, frameon=False)
+    plt.title(win_name)
+    canvas = fig.canvas
+    dpi = fig.get_dpi()
+    fig.set_size_inches((width + 1e-2) / dpi, (height + 1e-2) / dpi)
+
+    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    ax = plt.gca()
+    ax.axis('off')
+
+    polygons = []
+    color = []
+
+    # Iterate over bboxes and draw them along with TTC text
+    for i, (bbox, label) in enumerate(zip(bboxes, labels)):
+        bbox_int = bbox[:4].astype(np.int32)
+        confidence = bbox[4]
+        ttc = bbox[5]  # Extract the TTC value
+        
+        # Check if TTC is negative (vehicle moving away)
+        if ttc < 0:
+            ttc_display = "inf"  # Replace TTC with infinity if negative
+        
+        # Display ">30" if TTC is greater than 30, otherwise display the TTC value
+        elif ttc > 30:
+            ttc_display = ">30"  # Use ">30" for display
+        else:
+            ttc_display = f"{ttc:.2f}"  # Display TTC with 4 decimal points
+
+        print(ttc_display)
+
+        # Define the polygon coordinates for bbox
+        poly = [[bbox_int[0], bbox_int[1]], [bbox_int[0], bbox_int[3]],
+                [bbox_int[2], bbox_int[3]], [bbox_int[2], bbox_int[1]]]
+        np_poly = np.array(poly).reshape((4, 2))
+        polygons.append(Polygon(np_poly))
+        color.append(bbox_color)
+
+        # Draw the TTC text (formatted as "TTC: <value>" or "TTC: >30")
+        ax.text(
+            bbox_int[0],
+            bbox_int[1],
+            f'TTC: {ttc_display}',  # Use ttc_display, showing ">30" if applicable
+            bbox={'facecolor': 'white', 'alpha': 1, 'pad': 2, 'edgecolor': 'none'},  # Add background color
+            color=text_color,
+            fontsize=font_size,
+            fontweight="bold",  # Make text bold
+            verticalalignment='top',
+            horizontalalignment='left'
+        )
+
+    plt.imshow(img)
+
+    # Draw bounding boxes
+    p = PatchCollection(polygons, facecolor='none', edgecolors=color, linewidths=thickness)
+    ax.add_collection(p)
+
+    stream, _ = canvas.print_to_buffer()
+    buffer = np.frombuffer(stream, dtype='uint8')
+    img_rgba = buffer.reshape(height, width, 4)
+    rgb, alpha = np.split(img_rgba, [3], axis=2)
+    img = rgb.astype('uint8')
+    img = mmcv.rgb2bgr(img)
+
+    if show:
+        if wait_time == 0:
+            plt.show()
+        else:
+            plt.show(block=False)
+            plt.pause(wait_time)
+    if out_file is not None:
+        mmcv.imwrite(img, out_file)
+
+    plt.close()
+
+    return img
+
+def imshow_det_bboxes_with_ttc_color(img,
+                               bboxes,
+                               labels,
+                               segms=None,
+                               score_thr=0.4,  # Updated to filter by score_thr
+                               bbox_color='green',
+                               text_color='black',
+                               mask_color=None,
+                               thickness=2,
+                               font_size=1,  # Increase font size for TTC
+                               bbox_fill_colors=None,  # List of colors for filling
+                               win_name='',
+                               show=True,
+                               wait_time=0,
+                               out_file=None):
+    """Draw bboxes and TTC values (with scores) on an image with optional fill."""
+
+    assert bboxes.ndim == 2, \
+        f'bboxes ndim should be 2, but its ndim is {bboxes.ndim}.'
+    assert labels.ndim == 1, \
+        f'labels ndim should be 1, but its ndim is {labels.ndim}.'
+    assert bboxes.shape[0] == labels.shape[0], \
+        'bboxes.shape[0] and labels.shape[0] should have the same length.'
+    assert bboxes.shape[1] == 6, \
+        f'bboxes.shape[1] should be 6 (4 coords, 1 score, 1 TTC), but its {bboxes.shape[1]}.'
+
+    img = mmcv.imread(img).astype(np.uint8)
+
+    # Filter bboxes based on score threshold
+    if score_thr > 0:
+        scores = bboxes[:, 4]
+        inds = scores > score_thr
+        bboxes = bboxes[inds, :]
+        labels = labels[inds]
+        if segms is not None:
+            segms = segms[inds, ...]
+
+    bbox_color = color_val_matplotlib(bbox_color)
+    text_color = color_val_matplotlib(text_color)
+
+    img = mmcv.bgr2rgb(img)
+    width, height = img.shape[1], img.shape[0]
+    img = np.ascontiguousarray(img)
+
+    fig = plt.figure(win_name, frameon=False)
+    plt.title(win_name)
+    canvas = fig.canvas
+    dpi = fig.get_dpi()
+    fig.set_size_inches((width + 1e-2) / dpi, (height + 1e-2) / dpi)
+
+    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    ax = plt.gca()
+    ax.axis('off')
+
+    polygons = []
+    color = []
+
+    # Iterate over bboxes and draw them along with TTC text
+    for i, (bbox, label) in enumerate(zip(bboxes, labels)):
+        bbox_int = bbox[:4].astype(np.int32)
+        confidence = bbox[4]
+        ttc = bbox[5]  # Extract the TTC value
+        
+        # Check if TTC is negative (vehicle moving away)
+        if ttc < 0:
+            ttc_display = "inf"  # Replace TTC with infinity if negative
+        
+        # Display ">30" if TTC is greater than 30, otherwise display the TTC value
+        elif ttc > 30:
+            ttc_display = ">30"  # Use ">30" for display
+        else:
+            ttc_display = f"{ttc:.2f}"  # Display TTC with 4 decimal points
+
+        print(ttc_display)
+
+        # Define the polygon coordinates for bbox
+        poly = [[bbox_int[0], bbox_int[1]], [bbox_int[0], bbox_int[3]],
+                [bbox_int[2], bbox_int[3]], [bbox_int[2], bbox_int[1]]]
+        np_poly = np.array(poly).reshape((4, 2))
+        polygons.append(Polygon(np_poly))
+        color.append(bbox_color)
+
+        # Draw the TTC text (formatted as "TTC: <value>" or "TTC: >30")
+        ax.text(
+            bbox_int[0],
+            bbox_int[1],
+            f'TTC: {ttc_display}',  # Use ttc_display, showing ">30" if applicable
+            bbox={'facecolor': 'white', 'alpha': 1, 'pad': 2, 'edgecolor': 'none'},  # Add background color
+            color=text_color,
+            fontsize=font_size,
+            fontweight="bold",  # Make text bold
+            verticalalignment='top',
+            horizontalalignment='left'
+        )
+
+        # # Fill the bounding box if fill_bbox is enabled
+        if bbox_fill_colors is not None and i < len(bbox_fill_colors):
+            fill_color = bbox_fill_colors[i]  # Use the provided color for filling
+            normalizedcolor = tuple(c / 255 for c in fill_color)
+            ax.add_patch(plt.Rectangle(
+                (bbox_int[0], bbox_int[1]),
+                bbox_int[2] - bbox_int[0],
+                bbox_int[3] - bbox_int[1],
+                color=normalizedcolor,
+                alpha=0.4
+            ))
+
+    plt.imshow(img)
+
+    # Draw bounding boxes
+    p = PatchCollection(polygons, facecolor='none', edgecolors=color, linewidths=thickness)
+    ax.add_collection(p)
+
+    stream, _ = canvas.print_to_buffer()
+    buffer = np.frombuffer(stream, dtype='uint8')
+    img_rgba = buffer.reshape(height, width, 4)
+    rgb, alpha = np.split(img_rgba, [3], axis=2)
+    img = rgb.astype('uint8')
+    img = mmcv.rgb2bgr(img)
+
+    if show:
+        if wait_time == 0:
+            plt.show()
+        else:
+            plt.show(block=False)
+            plt.pause(wait_time)
+    if out_file is not None:
+        mmcv.imwrite(img, out_file)
+
+    plt.close()
+
+    return img
 
 def imshow_gt_det_bboxes(img,
                          annotation,
