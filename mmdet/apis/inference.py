@@ -1,5 +1,5 @@
 import warnings
-
+import os
 import mmcv
 import numpy as np
 import torch
@@ -147,7 +147,10 @@ def inference_detector(model, imgs):
         results = model(return_loss=False, rescale=True, **data)
 
     if not is_batch:
-        return results[0]
+        if len(results)!=1:
+            return results
+        else:
+            return results[0]
     else:
         return results
 
@@ -189,9 +192,11 @@ async def async_inference_detector(model, img):
 def show_result_pyplot(model,
                        img,
                        result,
+                       out_file,
                        score_thr=0.3,
                        title='result',
-                       wait_time=0):
+                       wait_time=0,
+                       ):
     """Visualize the detection results on the image.
 
     Args:
@@ -210,8 +215,9 @@ def show_result_pyplot(model,
         img,
         result,
         score_thr=score_thr,
-        show=True,
+        show=False,
         wait_time=wait_time,
         win_name=title,
-        bbox_color=(72, 101, 241),
-        text_color=(72, 101, 241))
+        bbox_color=(255, 0, 0),  # BGR
+        text_color=(255, 255, 255),
+        out_file=out_file)

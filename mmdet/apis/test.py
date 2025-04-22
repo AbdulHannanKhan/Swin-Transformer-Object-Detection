@@ -20,13 +20,15 @@ def single_gpu_test(model,
                     data_loader,
                     show=False,
                     out_dir=None,
-                    ttc_loss=False,
+                    ttc_loss=True,
                     error_func="mid",
                     check_range=(0.5, 1.3),
                     show_score_thr=0.3):
     model.eval()
     results = []
     ttc_losses = []
+    seg_iou_list = []
+    seg_perclass_iou_listsoflists=[]
     dataset = data_loader.dataset
     prog_bar = mmcv.ProgressBar(len(dataset))
     delta = 0
@@ -41,13 +43,15 @@ def single_gpu_test(model,
                 model(return_loss=False, rescale=True, **data)
             st = time.time()
             if ttc_loss:
-                result, mid = model(return_loss=False, rescale=True, error_func=error_func, check_range=check_range, **data)
+                result, mid, seg_iou, seg_perclass_iou_list  = model(return_loss=False, rescale=True, error_func=error_func, check_range=check_range, **data)
             else:
                 result = model(return_loss=False, rescale=True, **data)
             delta += time.time() - st
             count += 1
             if ttc_loss:
                 ttc_losses.append(mid)
+            seg_perclass_iou_listsoflists.append(seg_perclass_iou_list)
+            seg_iou_list.append(seg_iou)
         if i == 0:
             print(data["img"][0].data[0].shape)
 
@@ -112,7 +116,7 @@ def single_gpu_test(model,
             for k, v in ttc_dict.items():
                 ttc_dict[k] = np.array(v)
             ttc_res = ttc_dict
-        return results, ttc_res, class_names
+        return results, ttc_res, class_names, seg_iou_list, seg_perclass_iou_listsoflists
     return results
 
 
@@ -142,7 +146,7 @@ def disp2rgb(disp):
 
     return I
 
-
+#visualize TTC maps
 def single_gpu_ttc_test(model,
                     data_loader,
                     out_dir=None):
@@ -155,7 +159,7 @@ def single_gpu_ttc_test(model,
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             st = time.time()
-            ttc_maps = model(return_loss=False, rescale=True, ttc_out=True, **data)
+            ttc_maps = model(return_loss=False, rescale=True, ttc_out=True, **data) 
             delta += time.time() - st
             count += 1
 
@@ -212,7 +216,7 @@ def single_gpu_ttc_test(model,
     print("\nImg/sec: ", int(count / delta * 1000) / 1000)
 
 
-def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True, ttc_loss=False, error_func="mid", check_range=(0.5, 1.3)):
+def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True, ttc_loss=True, error_func="mid", check_range=(0.5, 1.3)):
     """Test model with multiple gpus.
 
     This method tests model with multiple gpus and collects the results
@@ -234,6 +238,8 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True,
     model.eval()
     results = []
     ttc_losses = []
+    seg_iou_list = []
+    seg_perclass_iou_listsoflists=[]
     dataset = data_loader.dataset
     # class_names = [c["name"] for c in dataset.coco.loadCats(dataset.cat_ids)]
     class_names = dataset.CLASSES
@@ -246,10 +252,12 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True,
         prog_bar = mmcv.ProgressBar(len(dataset))
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     for i, data in enumerate(data_loader):
+        # print("data")
+        # print(data)
         st = time.time()
         with torch.no_grad():
             if ttc_loss:
-                result, mid_loss = model(return_loss=False, rescale=True, error_func=error_func, check_range=check_range, **data)
+                result, mid_loss, seg_iou, seg_perclass_iou_list = model(return_loss=False, rescale=True, error_func=error_func, check_range=check_range, **data)
                 ttc_losses.append(mid_loss)
             else:
                 result = model(return_loss=False, rescale=True, **data)
@@ -258,6 +266,9 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True,
                 count += 1
             else:
                 skip = False
+            seg_iou_list.append(seg_iou)
+            seg_perclass_iou_listsoflists.append(seg_perclass_iou_list)
+
 
             # encode mask results
             if isinstance(result[0], tuple):
@@ -283,16 +294,20 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True,
                 prog_bar.update()
 
     # collect results from all ranks
-    if gpu_collect:
+    if gpu_collect: # do the same for segmentation
         results = collect_results_gpu(results, len(dataset))
         if ttc_loss:
             dist.barrier()
             ttc_losses = collect_results_gpu(ttc_losses, len(dataset))
+        seg_iou_list = collect_results_gpu(seg_iou_list, len(dataset))
+        seg_perclass_iou_listsoflists = collect_results_gpu(seg_perclass_iou_listsoflists, len(dataset))
+        #collect results IOU
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)
         if ttc_loss:
             dist.barrier()
             ttc_losses = collect_results_cpu(ttc_losses, len(dataset), ".ttc_losses")
+        
     print("\nImg/sec: ", int(count / delta * 1000) / 1000)
     if ttc_loss:
         ttc_res = []
@@ -314,7 +329,7 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, log=True,
             for k, v in ttc_dict.items():
                 ttc_dict[k] = np.array(v)
             ttc_res = ttc_dict
-        return results, ttc_res, class_names
+        return results, ttc_res, class_names, seg_iou_list, seg_perclass_iou_listsoflists
     return results
 
 
