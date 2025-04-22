@@ -466,3 +466,45 @@ class QTTCLoss(nn.Module):
             ttc_loss = ttc_loss + log_loss
         ttc_loss = ttc_loss / bins
         return self.loss_weight * ttc_loss
+
+
+@LOSSES.register_module()
+class SegLoss(nn.Module):
+    def __init__(self,
+                 reduction='mean',
+                 loss_weight=1.0):
+        """SegmentationLoss using Cross Entropy Loss.
+
+        Args:
+            reduction (str, optional): Specifies the reduction to apply to the output.
+                Options are "none", "mean" and "sum". Defaults to 'mean'.
+            loss_weight (float, optional): Weight of the loss. Defaults to 1.0.
+        """
+        super(SegLoss, self).__init__()
+        assert reduction in ('none', 'mean', 'sum')
+        self.loss_weight = loss_weight
+        self.criterion = nn.CrossEntropyLoss(reduction=reduction)
+
+    def forward(self, seg_pred, seg_label, **kwargs):
+        """Forward function.
+
+        Args:
+            seg_pred (torch.Tensor): The prediction with shape (batch_size, num_classes, H, W).
+            seg_label (torch.Tensor): The ground truth labels with shape (batch_size, H, W).
+        
+        Returns:
+            torch.Tensor: The calculated cross-entropy loss for segmentation.
+        """
+        # Ensure the label is of type long for CrossEntropyLoss
+        seg_label = seg_label.long()
+
+        upsampled_logits = nn.functional.interpolate(
+            seg_pred, size=seg_label.shape[-2:], 
+            mode="bicubic", 
+            align_corners=False
+        )
+
+        # Compute cross-entropy loss
+        loss = self.criterion(upsampled_logits, seg_label)
+        # loss_value = loss.item()
+        return self.loss_weight * loss
