@@ -9,7 +9,7 @@ import torch.nn as nn
 from mmcv.runner import auto_fp16
 from mmcv.utils import print_log
 
-from mmdet.core.visualization import imshow_det_bboxes
+from mmdet.core.visualization import imshow_det_bboxes, imshow_det_bboxes_with_ttc, imshow_det_bboxes_with_ttc_color
 from mmdet.utils import get_root_logger
 
 
@@ -204,6 +204,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
                 raise TypeError(
                     f'{loss_name} is not a tensor or list of tensors')
 
+        #overall loss
         loss = sum(_value for _key, _value in log_vars.items()
                    if 'loss' in _key)
 
@@ -245,9 +246,11 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
                 averaging the logs.
         """
         losses = self(**data)
-        if "MiD" in losses and type(losses["MiD"] is tuple):
-            losses["MiD"] = losses["MiD"][0]
-        loss, log_vars = self._parse_losses(losses)
+        # if "MiD" in losses and type(losses["MiD"] is tuple):
+            # losses["MiD"] = losses["MiD"][0]
+            # losses["MiD"] = losses["MiD"].item()
+            
+        loss, log_vars = self._parse_losses(losses) #sumsup all losses
 
         outputs = dict(
             loss=loss, log_vars=log_vars, num_samples=len(data['img_metas']))
@@ -355,3 +358,184 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
 
         if not (show or out_file):
             return img
+
+    def show_result_ttc(self,
+                    img,
+                    result,
+                    score_thr=0.3,
+                    bbox_color=(72, 101, 241),
+                    text_color=(72, 101, 241),
+                    mask_color=None,
+                    thickness=2,
+                    font_size=13,
+                    win_name='',
+                    show=False,
+                    wait_time=0,
+                    out_file=None):
+        """Draw `result` over `img`.
+
+        Args:
+            img (str or Tensor): The image to be displayed.
+            result (Tensor or tuple): The results to draw over `img`
+                bbox_result or (bbox_result, segm_result).
+            score_thr (float, optional): Minimum score of bboxes to be shown.
+                Default: 0.3.
+            bbox_color (str or tuple(int) or :obj:`Color`):Color of bbox lines.
+               The tuple of color should be in BGR order. Default: 'green'
+            text_color (str or tuple(int) or :obj:`Color`):Color of texts.
+               The tuple of color should be in BGR order. Default: 'green'
+            mask_color (None or str or tuple(int) or :obj:`Color`):
+               Color of masks. The tuple of color should be in BGR order.
+               Default: None
+            thickness (int): Thickness of lines. Default: 2
+            font_size (int): Font size of texts. Default: 13
+            win_name (str): The window name. Default: ''
+            wait_time (float): Value of waitKey param.
+                Default: 0.
+            show (bool): Whether to show the image.
+                Default: False.
+            out_file (str or None): The filename to write the image.
+                Default: None.
+
+        Returns:
+            img (Tensor): Only if not `show` or `out_file`
+        """
+        img = mmcv.imread(img)
+        img = img.copy()
+        if isinstance(result, tuple):
+            bbox_result, segm_result = result
+            if isinstance(segm_result, tuple):
+                segm_result = segm_result[0]  # ms rcnn
+        else:
+            bbox_result, segm_result = result, None
+        bboxes = np.vstack(bbox_result)
+        labels = [
+            np.full(bbox.shape[0], i, dtype=np.int32)
+            for i, bbox in enumerate(bbox_result)
+        ]
+        labels = np.concatenate(labels)
+        # draw segmentation masks
+        segms = None
+        if segm_result is not None and len(labels) > 0:  # non empty
+            segms = mmcv.concat_list(segm_result)
+            if isinstance(segms[0], torch.Tensor):
+                segms = torch.stack(segms, dim=0).detach().cpu().numpy()
+            else:
+                segms = np.stack(segms, axis=0)
+        # if out_file specified, do not show image in window
+        if out_file is not None:
+            show = False
+        # draw bounding boxes
+        img = imshow_det_bboxes_with_ttc(
+            img,
+            bboxes,
+            labels,
+            segms,
+            score_thr=score_thr,
+            bbox_color=bbox_color,
+            text_color=text_color,
+            mask_color=mask_color,
+            thickness=thickness,
+            font_size=font_size,
+            win_name=win_name,
+            show=show,
+            wait_time=wait_time,
+            out_file=out_file)
+
+        if not (show or out_file):
+            return img
+
+    def show_result_ttc_color(self,
+                    img,
+                    result,
+                    score_thr=0.3,
+                    bbox_color=(72, 101, 241),
+                    text_color=(72, 101, 241),
+                    mask_color=None,
+                    thickness=2,
+                    font_size=13,
+                    bbox_fill_colors=None,
+                    win_name='',
+                    show=False,
+                    wait_time=0,
+                    out_file=None):
+        """Draw `result` over `img` using `imshow_det_bboxes_with_ttc`.
+
+        Args:
+            img (str or Tensor): The image to be displayed.
+            result (Tensor or tuple): The results to draw over `img`,
+                bbox_result or (bbox_result, segm_result).
+            score_thr (float, optional): Minimum score of bboxes to be shown.
+                Default: 0.3.
+            bbox_color (str or tuple(int) or :obj:`Color`): Color of bbox lines.
+                The tuple of color should be in BGR order. Default: 'green'
+            text_color (str or tuple(int) or :obj:`Color`): Color of texts.
+                The tuple of color should be in BGR order. Default: 'green'
+            mask_color (None or str or tuple(int) or :obj:`Color`):
+                Color of masks. The tuple of color should be in BGR order.
+                Default: None
+            thickness (int): Thickness of lines. Default: 2
+            font_size (int): Font size of texts. Default: 13
+            font_weight (str): Font weight for the text. Default: 'bold'.
+            fill_bbox (bool): Whether to fill the bounding boxes. Default: False.
+            bbox_fill_colors (list): List of colors to fill bounding boxes.
+                Default: None.
+            win_name (str): The window name. Default: ''.
+            wait_time (float): Value of waitKey param. Default: 0.
+            show (bool): Whether to show the image. Default: False.
+            out_file (str or None): The filename to write the image. Default: None.
+
+            Returns:
+                img (Tensor): Only if not `show` or `out_file`.
+            """
+        img = mmcv.imread(img)
+        img = img.copy()
+
+        if isinstance(result, tuple):
+            bbox_result, segm_result = result
+            if isinstance(segm_result, tuple):
+                segm_result = segm_result[0]  # ms rcnn
+        else:
+            bbox_result, segm_result = result, None
+
+        bboxes = np.vstack(bbox_result)
+        labels = [
+            np.full(bbox.shape[0], i, dtype=np.int32)
+            for i, bbox in enumerate(bbox_result)
+        ]
+        labels = np.concatenate(labels)
+
+        # Draw segmentation masks
+        segms = None
+        if segm_result is not None and len(labels) > 0:  # non-empty
+            segms = mmcv.concat_list(segm_result)
+            if isinstance(segms[0], torch.Tensor):
+                segms = torch.stack(segms, dim=0).detach().cpu().numpy()
+            else:
+                segms = np.stack(segms, axis=0)
+
+        # If out_file specified, do not show image in window
+        if out_file is not None:
+            show = False
+
+        # Draw bounding boxes with TTC
+        img = imshow_det_bboxes_with_ttc_color(
+            img,
+            bboxes,
+            labels,
+            segms=segms,
+            score_thr=score_thr,
+            bbox_color=bbox_color,
+            text_color=text_color,
+            mask_color=mask_color,
+            thickness=thickness,
+            font_size=font_size,
+            bbox_fill_colors=bbox_fill_colors,
+            win_name=win_name,
+            show=show,
+            wait_time=wait_time,
+            out_file=out_file)
+
+        if not (show or out_file):
+            return img
+

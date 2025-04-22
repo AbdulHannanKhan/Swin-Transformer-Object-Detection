@@ -36,11 +36,13 @@ class CSPTTCHead(CSPHead):
                  loss_bbox=dict(type='RegLoss', loss_weight=0.01),
                  norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
                  num_classes=1,
+                 num_classes_seg=1,
                  predict_width=True,
                  bn_for_ttc=False,
                  drop_ttc=0.0,
                  wh_ratio=0.41,
                  loss_ttc=dict(type='MiDLoss', loss_weight=10),
+                 loss_seg=dict(type='SegLoss', loss_weight=10),
                  **kwargs):
 
         self.bn_for_ttc = bn_for_ttc
@@ -58,6 +60,8 @@ class CSPTTCHead(CSPHead):
             **kwargs)
 
         self.loss_ttc = build_loss(loss_ttc)
+        self.loss_seg = build_loss(loss_seg)
+        self.num_classes_seg = num_classes_seg
 
     def _init_layers(self):
         """Initialize layers of the head."""
@@ -85,6 +89,24 @@ class CSPTTCHead(CSPHead):
         self.csp_ttc = nn.Conv2d(self.feat_channels, 1, 3, padding=1)
         self.ttc_relu = nn.LeakyReLU(0.1)
 
+        # Additional initialization in _init_layers #convolutional layers
+        self.seg_convs = nn.ModuleList()
+        for i in range(self.stacked_convs):
+            chn = self.in_channels if i == 0 else self.feat_channels
+            self.seg_convs.append(
+                ConvModule(
+                    chn,
+                    self.feat_channels,
+                    3,
+                    stride=1,
+                    padding=1,
+                    conv_cfg=self.conv_cfg,
+                    norm_cfg=self.norm_cfg,
+                    bias=self.norm_cfg is None))
+
+        self.csp_seg = nn.Conv2d(self.feat_channels, 3, kernel_size=1) #3 classes #1x1 filter reduces the number of feature channels to 3
+
+
     def init_weights(self):
         """Initialize weights of the head."""
         super(CSPTTCHead, self).init_weights()
@@ -101,9 +123,10 @@ class CSPTTCHead(CSPHead):
                       offset_maps=None,
                       proposal_cfg=None,
                       ttc_maps=None,
+                      gt_seg_maps=None,
                       **kwargs):
         """
-        Args:
+        Args: 
             x (list[Tensor]): Features from FPN.
             img_metas (list[dict]): Meta information of each image, e.g.,
                 image size, scaling factor, etc.
@@ -127,7 +150,7 @@ class CSPTTCHead(CSPHead):
         else:
             loss_inputs = outs + (gt_bboxes, gt_labels, img_metas)
         losses = self.loss(*loss_inputs, classification_maps=classification_maps, scale_maps=scale_maps,
-                           offset_maps=offset_maps, gt_bboxes_ignore=gt_bboxes_ignore, ttc_maps=ttc_maps)
+                           offset_maps=offset_maps, gt_bboxes_ignore=gt_bboxes_ignore, ttc_maps=ttc_maps, gt_seg_maps=gt_seg_maps)
         if proposal_cfg is None:
             return losses
         else:
@@ -142,6 +165,7 @@ class CSPTTCHead(CSPHead):
         reg_feat = x
         offset_feat = x
         ttc_feat = x
+        seg_feat = x
 
         for cls_conv in self.cls_convs:
             cls_feat = cls_conv(cls_feat)
@@ -152,6 +176,9 @@ class CSPTTCHead(CSPHead):
         for ttc_conv in self.ttc_convs:
             ttc_feat = ttc_conv(ttc_feat)
 
+        for seg_conv in self.seg_convs:
+            seg_feat = seg_conv(seg_feat)
+
         for offset_conv in self.offset_convs:
             offset_feat = offset_conv(offset_feat)
 
@@ -159,17 +186,19 @@ class CSPTTCHead(CSPHead):
         bbox_pred = reg_scale(self.csp_reg(reg_feat).float())
         offset_pred = offset_scale(self.csp_offset(offset_feat).float())
         ttc_pred = self.ttc_relu(self.csp_ttc(ttc_feat)).float() + 0.4
-        return cls_score, bbox_pred, offset_pred, ttc_pred
+        seg_pred = self.csp_seg(seg_feat) #segmentation path
+        return cls_score, bbox_pred, offset_pred, ttc_pred, seg_pred
 
     def get_targets(self, points, gt_bboxes_list, gt_labels_list):
         pass
 
-    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds'))
+    @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds', 'seg_preds'))
     def loss(self,
              cls_scores,
              bbox_preds,
              offset_preds,
              ttc_preds,
+             seg_preds,
              gt_bboxes,
              gt_labels,
              img_metas,
@@ -177,17 +206,20 @@ class CSPTTCHead(CSPHead):
              scale_maps=None,
              offset_maps=None,
              gt_bboxes_ignore=None,
-             ttc_maps=None):
+             ttc_maps=None,
+             gt_seg_maps=None):
         assert len(cls_scores) == len(bbox_preds) == len(offset_preds)
         cls_maps = self.concat_batch_gts(classification_maps)
         bbox_gts = self.concat_batch_gts(scale_maps)
         ttc_maps = self.concat_batch_gts(ttc_maps)
         offset_gts = self.concat_batch_gts(offset_maps)
+        gt_seg_maps = self.concat_batch_gts(gt_seg_maps) #seg_maps gt and predictions are different sizes. 
+
 
         loss_cls = []
         loss_tv = []
         for cls_score, cls_gt in zip(cls_scores, cls_maps):
-            loss_cls.append(self.loss_cls(cls_score, cls_gt))
+            loss_cls.append(self.loss_cls(cls_score, cls_gt)) #centre loss
 
         loss_cls = loss_cls[0]
 
@@ -196,6 +228,7 @@ class CSPTTCHead(CSPHead):
             loss_bbox.append(self.loss_bbox(bbox_pred, bbox_gt))
 
         loss_bbox = loss_bbox[0]
+        
         loss_ttc = []
         for ttc_pred, ttc_gt in zip(ttc_preds, ttc_maps):
             ttc = self.loss_ttc(ttc_pred, ttc_gt)
@@ -223,12 +256,43 @@ class CSPTTCHead(CSPHead):
                 loss_tv=loss_tv.mean(),
             )
 
+        # loss_bbox = []
+        # for bbox_pred, bbox_gt in zip(bbox_preds, bbox_gts):
+        #     loss_bbox.append(self.loss_bbox(bbox_pred, bbox_gt))
+
+        # loss_bbox = loss_bbox[0]
+
+        # Calculate segmentation loss using Cross Entropy
+        loss_seg=[]
+        for seg_pred, gt_seg_map in zip(seg_preds, gt_seg_maps):
+            loss_seg.append(self.loss_seg(seg_pred, gt_seg_map))
+        loss_seg = loss_seg[0]
+
+        upsampled_logits = nn.functional.interpolate(
+            seg_preds[0], size=gt_seg_map.shape[-2:], 
+            mode="bicubic", 
+            align_corners=False
+        )
+
+        seg_ious = self.calculate_segmentation_iou(upsampled_logits.max(1)[1].data, gt_seg_maps[0], self.num_classes_seg)
+
+        #     if isinstance(ttc, tuple):
+        #         tv = ttc[0]
+        #         loss_tv.append(tv)
+        #         ttc = ttc[1]
+        #     loss_ttc.append(ttc)
+
+        # loss_ttc = loss_ttc[0]
+
+            
         return dict(
             loss_cls=loss_cls,
             loss_bbox=loss_bbox,
             loss_offset=loss_offset,
             loss_mMiD=loss_ttc,
-            MiD=loss_ttc.mean()/self.loss_ttc.loss_weight * 1e4,
+            MiD=loss_ttc.mean()/self.loss_ttc.loss_weight * 1e4, #Mid mean of TTC divided by the weight
+            loss_seg=loss_seg,
+            seg_iou=seg_ious.mean()
         )
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds', 'offset_preds', 'ttc_preds'))
@@ -434,3 +498,23 @@ class CSPTTCHead(CSPHead):
                 img_metas[0][0]['scale_factor'])
         bbox_results = bbox2result(_det_bboxes, det_labels, self.num_classes + 1)
         return bbox_results, det_ttcs
+
+    def calculate_segmentation_iou(self, pred_masks, gt_masks, num_classes):
+        ious = []
+        for cls in range(num_classes):
+            # Create binary masks for the current class
+            pred_bin = (pred_masks == cls).float()
+            gt_bin = (gt_masks == cls).float()
+
+            # Calculate intersection and union
+            intersection = (pred_bin * gt_bin).sum(dim=(1, 2))  # Sum over H, W
+            union = (pred_bin + gt_bin).clamp(0, 1).sum(dim=(1, 2))  # Union sum over H, W
+
+            # Calculate IoU and handle division by zero
+            iou = intersection / union.clamp(min=1e-6)
+            ious.append(iou)
+
+        # if len(pred_masks)==1: #For validation 
+        #     return torch.stack(ious, dim=0).mean(dim=1),torch.stack(ious, dim=0)
+        # Return mean IoU per class
+        return torch.stack(ious, dim=0).mean(dim=1) #for training

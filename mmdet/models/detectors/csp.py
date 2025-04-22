@@ -4,6 +4,7 @@ from .single_stage import SingleStageDetector
 from ...utils.logger import log_image_with_boxes
 import numpy as np
 import torch
+import torch.nn as nn
 import copy
 from ..losses import MiDLoss, QTTCLoss
 
@@ -41,7 +42,8 @@ class CSP(SingleStageDetector):
                       scale_maps,
                       offset_maps,
                       gt_bboxes_ignore=None,
-                      ttc_maps=None):
+                      ttc_maps=None,
+                      gt_seg_maps=None):
         """
         Args:
             img (Tensor): Input images of shape (N, C, H, W).
@@ -64,7 +66,7 @@ class CSP(SingleStageDetector):
         x = self.extract_feat(img)
         losses = self.bbox_head.forward_train(x, img_metas, gt_bboxes, gt_labels,
                                               gt_bboxes_ignore, classification_maps=classification_maps,
-                                              scale_maps=scale_maps, offset_maps=offset_maps, ttc_maps=ttc_maps)
+                                              scale_maps=scale_maps, offset_maps=offset_maps, ttc_maps=ttc_maps,gt_seg_maps=gt_seg_maps)
         return losses
 
     def exp_test(self, img, cx, cy):
@@ -95,7 +97,8 @@ class CSP(SingleStageDetector):
         x = self.extract_feat(img)
         # print("x shape", img[0].shape)
         outs = self.bbox_head(x, img_metas)
-        predicted_MiD = len(outs) == 4
+        predicted_MiD = len(outs) == 5
+        outs, seg_out = outs[:-1],outs[-1]
         bbox_list = self.bbox_head.get_bboxes(
             *outs, img_metas, self.test_cfg, rescale=rescale)
 
@@ -104,6 +107,24 @@ class CSP(SingleStageDetector):
 
         ef = error_func
 
+
+        # Access gt_seg_maps from kwargs
+        gt_seg_maps = kwargs.get('gt_seg_maps', None)  # Default to None if not provided
+
+        # Use gt_seg_maps as needed in your function
+        if gt_seg_maps is not None: #for validation
+            upsampled_logits = nn.functional.interpolate(
+                seg_out[0], size=gt_seg_maps[0].shape[-2:], 
+                mode="bicubic", 
+                align_corners=False
+            )
+            # Example: Perform operations with gt_seg_maps
+            seg_iou_val = self.bbox_head.calculate_segmentation_iou(
+                upsampled_logits.max(1)[1].data, gt_seg_maps[0], self.bbox_head.num_classes_seg
+            )
+            seg_perclass_list = [round(value.item(), 5) for value in seg_iou_val]
+            seg_iou_val=seg_iou_val.mean()
+
         def mid_error(pred, gt):
             pred = pred.clamp(min=1e-10)
             # print("\nPred: ", pred.min(), pred.max(), pred.mean())
@@ -111,7 +132,7 @@ class CSP(SingleStageDetector):
             return torch.abs(torch.log(gt) - torch.log(pred)) * 1e4
 
         def ttc_error(pred, gt, _check_range=(0, 10)):
-            pred = 0.1/(1 - pred)
+            pred = 0.1/(1 - pred) 
             gt = 0.1/(1 - gt)
 
             if gt < _check_range[0] or gt > _check_range[1]:
@@ -248,7 +269,7 @@ class CSP(SingleStageDetector):
                 pred_tti_value = tti_pred[det_center[1], det_center[0]]
 
                 det_ttc.append(-1)
-                # det_ttc.append(pred_tti_value.item())  //TODO:// Current not working, fix it later
+                # det_ttc.append(pred_tti_value.item())  #//TODO:// Current not working, fix it later
 
             det_ttc = torch.tensor(det_ttc).to(tti_pred.device)
             # reshape to (n, 1)
@@ -260,11 +281,11 @@ class CSP(SingleStageDetector):
                 for det_bboxes, det_labels in bbox_list
             ]
 
-        elif predicted_MiD:
+        elif predicted_MiD: #for inference
             det_bboxes = bbox_list[0][0]
 
             # mid_array = ttc_bins
-
+            eta_bbox=[]
             for i in range(len(det_bboxes)):
                 bbox = det_bboxes[i]
 
@@ -279,18 +300,31 @@ class CSP(SingleStageDetector):
                 # calculate the tti_pred value at the det center
                 pred_tti_value = tti_pred[det_center[1], det_center[0]]
 
-                det_ttc.append(-1)
-                # det_ttc.append(pred_tti_value.item())  //TODO::FIX THIS!!! Add actual ttc values to boxes
+                # det_ttc.append(-1)
+                eta_bbox.append(pred_tti_value.item())
+                ttcitem = 0.1/(1-(pred_tti_value.item())) #pred_tti_value.item() eta value
+                det_ttc.append(ttcitem)  #//TODO::FIX THIS!!! Add actual ttc values to boxes
+                # det_ttc.append(pred_tti_value.item())  #//TODO::FIX THIS!!! Add actual ttc values to boxes
 
             det_ttc = torch.tensor(det_ttc).to(tti_pred.device)
             # reshape to (n, 1)
             det_ttc = det_ttc.view(-1, 1)
 
+            #merged both the ttc and bboxes results
             bbox_results = [
                 bbox2result(torch.cat([det_bboxes, det_ttc], 1), det_labels, self.bbox_head.num_classes + 1,
                             box_dim=6)
                 for det_bboxes, det_labels in bbox_list
             ]
+
+            #write code for segmentation
+            upsampled_logits = nn.functional.interpolate(
+                seg_out[0], size=img.shape[2:], 
+                mode="bilinear", 
+                align_corners=False
+            )
+
+            seg_labels = torch.argmax(upsampled_logits.squeeze(), dim=0)
 
         else:
             bbox_results = [
@@ -299,6 +333,6 @@ class CSP(SingleStageDetector):
             ]
 
         if gt_tti is not None:
-            return bbox_results, mid_array
+            return bbox_results, mid_array, seg_iou_val.item(), seg_perclass_list
 
-        return bbox_results
+        return bbox_results, seg_labels, eta_bbox
