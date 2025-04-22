@@ -29,12 +29,13 @@ except ImportError:
 class CSPMaps(object):
 
     def __init__(self, radius=8, with_width=True, stride=4, regress_range=(-1, 1e8), with_ttc=False,
-                 bbox_ttc=False, image_shape=None, ttc_mode='continuous', ttc_bins=1, num_classes=1, bin_bias=0.5, bin_weight=0.1):
+                 bbox_ttc=False, image_shape=None, ttc_mode='continuous', ttc_bins=1, num_classes=1, num_classes_seg=1, bin_bias=0.5, bin_weight=0.1):
         self.radius = radius
         self.stride = stride
         self.regress_range = regress_range
         self.image_shape = image_shape
         self.num_classes = num_classes
+        self.num_classes_seg = num_classes_seg
         self.with_width=with_width
         self.with_ttc = with_ttc
         self.bb_ttc = bbox_ttc
@@ -66,6 +67,8 @@ class CSPMaps(object):
             pos_map, scale_map, offset_map = self.calc_gt_center(gts, igs, labels, self.num_classes)
             results.update(dict(classification_maps=pos_map, scale_maps=scale_map, offset_maps=offset_map))
 
+        if 'gt_semantic_seg' in results:
+            results['gt_seg_maps'] = results['gt_semantic_seg']
         return results
 
     def calc_gt_center(self, gts, igs, labels=None, classes=1, ttc=None, ttc_mode='continuous', ttc_bins=1):
@@ -872,14 +875,19 @@ class RandomPave(object):
     def __init__(self, size):
         self.size = size
 
-    def random_pave(self, image, gts, igs):
+    def random_pave(self, image, gts, igs, seg_map):
         img_height, img_width = image.shape[0:2]
         pave_h, pave_w = self.size
-
+        #The result is a canvas filled with a neutral color based on the average color of image.
         paved_image = np.ones((pave_h, pave_w, 3), dtype=image.dtype) * np.mean(image, dtype=int)
         pave_x = int(np.random.randint(0, pave_w - img_width + 1))
         pave_y = int(np.random.randint(0, pave_h - img_height + 1))
         paved_image[pave_y:pave_y + img_height, pave_x:pave_x + img_width] = image
+
+        # Adjust segmentation map with the same padded size 
+        paved_seg_map = np.ones((pave_h, pave_w), dtype=seg_map.dtype) * 0 #blending the paved padding with 0
+        paved_seg_map[pave_y:pave_y + img_height, pave_x:pave_x + img_width] = seg_map
+
         # pave detections
         if len(igs) > 0:
             igs[:, 0:4:2] += pave_x
@@ -889,11 +897,11 @@ class RandomPave(object):
             gts[:, 0:4:2] += pave_x
             gts[:, 1:4:2] += pave_y
 
-        return paved_image, gts, igs
+        return paved_image, gts, igs, paved_seg_map
 
     def __call__(self, results):
-        results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'] = \
-            self.random_pave(results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'])
+        results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_semantic_seg'] = \
+            self.random_pave(results['img'], results['gt_bboxes'], results['gt_bboxes_ignore'], results['gt_semantic_seg'])
         return results
 
 

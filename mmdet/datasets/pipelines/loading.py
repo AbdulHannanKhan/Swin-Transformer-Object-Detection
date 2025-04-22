@@ -342,7 +342,10 @@ class LoadAnnotations(object):
         Returns:
             numpy.ndarray: The decode bitmap mask of shape (img_h, img_w).
         """
-
+        # Handle the case where there is no mask annotation.
+        if mask_ann is None:
+            return None
+        
         if isinstance(mask_ann, list):
             # polygon -- a single object might consist of multiple parts
             # we merge all parts into one mask rle code
@@ -390,11 +393,10 @@ class LoadAnnotations(object):
         gt_masks = results['ann_info']['masks']
         if self.poly2mask:
             gt_masks = BitmapMasks(
-                [self._poly2mask(mask, h, w) for mask in gt_masks], h, w)
+                [self._poly2mask(mask, h, w) if mask is not None else np.zeros((h, w), dtype=np.uint8) for mask in gt_masks], h, w)
         else:
             gt_masks = PolygonMasks(
-                [self.process_polygons(polygons) for polygons in gt_masks], h,
-                w)
+                [self.process_polygons(polygons) for polygons in gt_masks], h, w)
         results['gt_masks'] = gt_masks
         results['mask_fields'].append('gt_masks')
         return results
